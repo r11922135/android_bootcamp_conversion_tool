@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+venv/
+.venv/
+env/
+*.egg-info/
+
+# Media files (too large for git)
+videos/*.mp4
+videos/*.mkv
+videos/*.avi
+videos/*.mov
+videos/*.webm
+videos/*.flv
+videos/*.wmv
+
+# Generated output
+audio/
+transcripts/
+notes/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo

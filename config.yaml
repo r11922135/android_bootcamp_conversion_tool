@@ -1,0 +1,107 @@
+# ============================================================
+# Android Bootcamp 影片轉筆記 — 設定檔
+# ============================================================
+
+# --- 目錄設定 ---
+paths:
+  videos_dir: "videos"          # 影片來源目錄
+  audio_dir: "audio"            # 音檔輸出目錄
+  transcripts_dir: "transcripts" # 逐字稿輸出目錄
+  notes_dir: "notes"            # Markdown 筆記輸出目錄
+
+# --- 支援的影片格式 ---
+video_extensions:
+  - ".mp4"
+  - ".mkv"
+  - ".avi"
+  - ".webm"
+  - ".mov"
+  - ".flv"
+  - ".wmv"
+
+# --- FFmpeg 設定 ---
+ffmpeg:
+  # ffmpeg_path: "ffmpeg"       # 如果 FFmpeg 不在 PATH，可在此指定完整路徑
+  audio_format: "wav"           # 輸出音檔格式 (wav 最適合 Whisper)
+  sample_rate: 16000            # 取樣率 (Whisper 要求 16kHz)
+  channels: 1                   # 聲道數 (mono)
+
+# --- Whisper 語音辨識設定 ---
+whisper:
+  # 模型選擇: tiny, base, small, medium, large-v2, large-v3, large-v3-turbo
+  model: "large-v3-turbo"
+  
+  # 運算裝置: cuda (GPU) / cpu
+  device: "cuda"
+  
+  # 精度: float16 (GPU推薦) / int8 (省記憶體) / float32 (CPU)
+  compute_type: "float16"
+  
+  # 語言設定: null=自動偵測, "zh"=中文, "en"=英文, "ja"=日文
+  language: "en"
+  
+  # 是否輸出含時間戳的 SRT 字幕檔
+  output_srt: true
+  
+  # 是否輸出純文字逐字稿
+  output_txt: true
+  
+  # Beam size (越大越準但越慢)
+  beam_size: 5
+  
+  # VAD 過濾 (過濾靜音段落，加速處理)
+  vad_filter: true
+  
+  # 初始提示詞 (幫助辨識專有名詞)
+  initial_prompt: "This is an Android development bootcamp course covering Kotlin, Jetpack Compose, Android Studio, Activity, Fragment, ViewModel, LiveData, Room, Retrofit, Coroutines, and related technologies."
+
+# --- LLM 筆記生成設定 ---
+llm:
+  # API 端點 (OpenAI 相容格式)
+  # 整個專案跑在 Jetson Orin Thor 上，Ollama 使用 localhost
+  # Ollama 預設: http://localhost:11434/v1
+  # llama.cpp 預設: http://localhost:8080/v1
+  api_base: "http://localhost:11434/v1"
+  
+  # API Key (Ollama 不需要，填任意值即可)
+  api_key: "not-needed"
+  
+  # 模型名稱 (對應 Ollama 中的模型名)
+  # Thor 有充足記憶體，可直接跑大模型
+  model: "qwen2.5:72b-instruct-q4_K_M"
+  
+  # 最大輸出 token 數
+  max_tokens: 4096
+  
+  # Temperature (0.0~1.0，越低越精確)
+  temperature: 0.3
+  
+  # 逐字稿分段大小 (字元數)
+  # 太大可能超過 context window，太小可能丟失上下文
+  chunk_size: 3000
+  
+  # 分段重疊字元數 (避免切斷段落)
+  chunk_overlap: 200
+  
+  # 每次 API 呼叫之間的延遲 (秒)，避免 OOM
+  request_delay: 1.0
+  
+  # 最大重試次數
+  max_retries: 3
+
+# --- 筆記格式設定 ---
+notes:
+  # 筆記語言: "zh-TW" (繁體中文), "zh-CN" (簡體中文), "en" (英文)
+  language: "en"
+  
+  # 是否在筆記中包含時間戳記
+  include_timestamps: true
+  
+  # 是否自動偵測程式碼並格式化
+  detect_code: true
+  
+  # 是否在最後生成摘要
+  generate_summary: true
+  
+  # 是否在最後生成 Q&A
+  generate_qa: true
