@@ -29,7 +29,7 @@ ffmpeg:
 # --- Whisper 語音辨識設定 ---
 whisper:
   # 模型選擇: tiny, base, small, medium, large-v2, large-v3, large-v3-turbo
-  model: "large-v3-turbo"
+  model: "medium"
   
   # 運算裝置: cuda (GPU) / cpu
   device: "cuda"
@@ -50,7 +50,7 @@ whisper:
   beam_size: 5
   
   # VAD 過濾 (過濾靜音段落，加速處理)
-  vad_filter: true
+  vad_filter: false
   
   # 初始提示詞 (幫助辨識專有名詞)
   initial_prompt: "This is an Android development bootcamp course covering Kotlin, Jetpack Compose, Android Studio, Activity, Fragment, ViewModel, LiveData, Room, Retrofit, Coroutines, and related technologies."
@@ -58,7 +58,7 @@ whisper:
 # --- LLM 筆記生成設定 ---
 llm:
   # API 端點 (OpenAI 相容格式)
-  # 整個專案跑在 Jetson Orin Thor 上，Ollama 使用 localhost
+  # 整個專案跑在 Jetson AGX Orin 上，Ollama 使用 localhost
   # Ollama 預設: http://localhost:11434/v1
   # llama.cpp 預設: http://localhost:8080/v1
   api_base: "http://localhost:11434/v1"
@@ -67,8 +67,8 @@ llm:
   api_key: "not-needed"
   
   # 模型名稱 (對應 Ollama 中的模型名)
-  # Thor 有充足記憶體，可直接跑大模型
-  model: "qwen2.5:72b-instruct-q4_K_M"
+  # AGX Orin 64GB 建議使用 32B 模型；若記憶體充足可嘗試 72B
+  model: "qwen2.5:32b-instruct-q4_K_M"
   
   # 最大輸出 token 數
   max_tokens: 4096

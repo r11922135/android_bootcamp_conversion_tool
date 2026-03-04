@@ -1,8 +1,8 @@
 #!/bin/bash
 # ============================================================
-# Jetson Orin Thor — 完整環境設定腳本
+# Jetson AGX Orin — 完整環境設定腳本
 # 安裝所有必要環境：Python、FFmpeg、Whisper、Ollama、LLM 模型
-# 整個影片轉筆記管線都在 Thor 上執行
+# 整個影片轉筆記管線都在 AGX Orin 上執行
 # ============================================================
 
 set -e
@@ -11,7 +11,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$SCRIPT_DIR"
 
 echo "============================================"
-echo "  Jetson Orin Thor — 完整環境設定"
+echo "  Jetson AGX Orin — 完整環境設定"
 echo "  整個管線在此機器上執行"
 echo "============================================"
 echo ""
@@ -97,20 +97,20 @@ done
 
 echo ""
 echo "  選擇要下載的 LLM 模型："
-echo "    1) Qwen2.5 72B Q4 (推薦，綜合能力最強，需要 ~50GB 記憶體)"
-echo "    2) Llama 3.1 70B Q4 (英文理解力強，需要 ~48GB 記憶體)"
-echo "    3) Qwen2.5 32B Q4 (平衡選擇，需要 ~24GB 記憶體)"
-echo "    4) Qwen2.5 14B Q4 (輕量快速，需要 ~12GB 記憶體)"
+echo "    1) Qwen2.5 32B Q4 (推薦，AGX Orin 64GB 最佳平衡，需要 ~24GB 記憶體)"
+echo "    2) Qwen2.5 14B Q4 (輕量快速，需要 ~12GB 記憶體)"
+echo "    3) Llama 3.1 70B Q4 (英文理解力強，需要 ~48GB，AGX 上較吃力)"
+echo "    4) Qwen2.5 72B Q4 (綜合最強，需要 ~50GB，AGX 上可能 OOM)"
 echo ""
 read -p "  請輸入選擇 (1/2/3/4) [預設: 1]: " MODEL_CHOICE
 MODEL_CHOICE=${MODEL_CHOICE:-1}
 
 case $MODEL_CHOICE in
-    1) MODEL="qwen2.5:72b-instruct-q4_K_M" ;;
-    2) MODEL="llama3.1:70b-instruct-q4_K_M" ;;
-    3) MODEL="qwen2.5:32b-instruct-q4_K_M" ;;
-    4) MODEL="qwen2.5:14b-instruct-q4_K_M" ;;
-    *) MODEL="qwen2.5:72b-instruct-q4_K_M" ;;
+    1) MODEL="qwen2.5:32b-instruct-q4_K_M" ;;
+    2) MODEL="qwen2.5:14b-instruct-q4_K_M" ;;
+    3) MODEL="llama3.1:70b-instruct-q4_K_M" ;;
+    4) MODEL="qwen2.5:72b-instruct-q4_K_M" ;;
+    *) MODEL="qwen2.5:32b-instruct-q4_K_M" ;;
 esac
 
 echo "  下載 $MODEL（這需要一些時間）..."
