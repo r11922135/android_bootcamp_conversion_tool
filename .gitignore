@@ -2,10 +2,24 @@
 __pycache__/
 *.pyc
 *.pyo
+*.pyd
+.Python
 venv/
 .venv/
 env/
 *.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Runtime / logs
+*.log
+logs/
+*.pid
+*.seed
+*.out
+*.err
+nohup.out
 
 # Media files (too large for git)
 videos/*.mp4
@@ -20,6 +34,9 @@ videos/*.wmv
 audio/
 transcripts/
 notes/
+slides/
+tmp/
+temp/
 
 # OS
 .DS_Store

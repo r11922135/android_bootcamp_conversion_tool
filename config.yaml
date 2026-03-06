@@ -8,6 +8,7 @@ paths:
   audio_dir: "audio"            # 音檔輸出目錄
   transcripts_dir: "transcripts" # 逐字稿輸出目錄
   notes_dir: "notes"            # Markdown 筆記輸出目錄
+  slides_dir: "slides"          # 可選：投影片目錄（同檔名 .txt/.md/.pdf）
 
 # --- 支援的影片格式 ---
 video_extensions:
@@ -89,9 +90,33 @@ llm:
   # 最大重試次數
   max_retries: 3
 
+  # 可選：slides 融合時最多讀取字元數（避免 prompt 過長）
+  slides_max_chars: 8000
+
+# --- 中文筆記生成設定（小模型友善） ---
+llm_zh:
+  # 可留空沿用 llm.model；若要分開模型可在此指定
+  model: "qwen2.5:32b-instruct-q4_K_M"
+
+  # 中文改寫建議較低溫，減少翻譯腔與格式漂移
+  temperature: 0.15
+
+  # 中文輸出 token 上限
+  max_tokens: 4096
+
+  # 中文改寫分段（來源是英文詳細筆記）
+  chunk_size: 2600
+  chunk_overlap: 180
+
+  # 單段最少字數，低於此值會觸發自動修正
+  min_chunk_chars: 260
+
+  # 中文段落呼叫重試次數
+  max_retries: 3
+
 # --- 筆記格式設定 ---
 notes:
-  # 筆記語言: "zh-TW" (繁體中文), "zh-CN" (簡體中文), "en" (英文)
+  # 筆記語言: "zh-TW" (繁體中文), "en" (英文)
   language: "en"
   
   # 是否在筆記中包含時間戳記
@@ -105,3 +130,16 @@ notes:
   
   # 是否在最後生成 Q&A
   generate_qa: true
+
+  # 是否額外生成繁中筆記（含摘要與詳細筆記，台灣慣用詞）
+  generate_zh_summary: false
+
+  # 中文術語偏好（可持續擴充）
+  zh_glossary:
+    - "Activity：活動"
+    - "Fragment：片段"
+    - "ViewModel：檢視模型"
+    - "Coroutine：協程"
+    - "Thread：執行緒"
+    - "Memory：記憶體"
+    - "Pipeline：處理流程"

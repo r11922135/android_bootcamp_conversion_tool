@@ -5,6 +5,8 @@ Step 2: 語音轉文字
 
 import sys
 import json
+import time
+import threading
 from pathlib import Path
 from tqdm import tqdm
 
@@ -51,15 +53,57 @@ def transcribe_audio(audio_path: Path, config: dict) -> list[dict]:
     
     if info.language:
         print(f"  偵測到語言：{info.language} (機率：{info.language_probability:.2%})")
-    
+
+    total_duration = float(getattr(info, "duration", 0.0) or 0.0)
+    start_wall = time.time()
+    stop_event = threading.Event()
+    progress_state = {"segments": 0, "processed_seconds": 0.0}
+
+    def heartbeat():
+        while not stop_event.wait(2.0):
+            elapsed = max(time.time() - start_wall, 0.001)
+            segments_count = progress_state["segments"]
+            processed = progress_state["processed_seconds"]
+            speed = processed / elapsed if processed > 0 else 0.0
+
+            if total_duration > 0:
+                pct = min(processed / total_duration * 100, 100.0)
+                eta = (total_duration - processed) / speed if speed > 0 else 0.0
+                print(
+                    f"\r  辨識進度：{pct:5.1f}% | "
+                    f"已處理 {format_timestamp(processed)}/{format_timestamp(total_duration)} | "
+                    f"段落 {segments_count} | 速率 {speed:.2f}x | "
+                    f"預估剩餘 {format_timestamp(max(eta, 0.0))}",
+                    end="",
+                    flush=True,
+                )
+            else:
+                print(
+                    f"\r  辨識進度：已處理 {format_timestamp(processed)} | "
+                    f"段落 {segments_count} | 速率 {speed:.2f}x",
+                    end="",
+                    flush=True,
+                )
+
+    heartbeat_thread = threading.Thread(target=heartbeat, daemon=True)
+    heartbeat_thread.start()
+
     segments = []
-    for seg in segments_gen:
-        segments.append({
-            "start": seg.start,
-            "end": seg.end,
-            "text": seg.text.strip()
-        })
-    
+    try:
+        for seg in segments_gen:
+            segments.append({
+                "start": seg.start,
+                "end": seg.end,
+                "text": seg.text.strip()
+            })
+            progress_state["segments"] = len(segments)
+            progress_state["processed_seconds"] = float(seg.end)
+    finally:
+        stop_event.set()
+        heartbeat_thread.join(timeout=0.2)
+        if progress_state["segments"] > 0:
+            print()
+
     return segments
 
 

@@ -2,7 +2,7 @@
 
 ## 📌 專案概述
 
-將 Android Bootcamp 英文影片自動轉換為結構化英文 Markdown 筆記，全程在 **Jetson Orin Thor** 上使用本地算力執行，不依賴任何雲端 API。
+將 Android Bootcamp 英文影片自動轉換為結構化 Markdown 筆記（英文完整筆記 + 繁中筆記），全程在 **Jetson AGX Orin** 上使用本地算力執行，不依賴任何雲端 API。
 
 ---
 
@@ -10,10 +10,10 @@
 
 | 硬體 | 用途 | 記憶體 |
 |------|------|--------|
-| **Jetson Orin Thor** | 執行整個管線（FFmpeg + Whisper + LLM） | 最高 128 GB 統一記憶體 |
+| **Jetson AGX Orin** | 執行整個管線（FFmpeg + Whisper + LLM） | 最高 128 GB 統一記憶體 |
 | **RTX 4080**（備用） | 若需分流可用來跑 Whisper | 16 GB VRAM |
 
-> **整個專案直接跑在 Jetson Orin Thor 上**，Thor 的統一記憶體架構足以同時負擔 Whisper 語音辨識與大型 LLM 推理。
+> **整個專案直接跑在 Jetson AGX Orin 上**，AGX Orin 的統一記憶體架構足以同時負擔 Whisper 語音辨識與大型 LLM 推理。
 
 ### 處理流程
 
@@ -21,43 +21,43 @@
 英文影片 ─→ [FFmpeg 抽音軌] ─→ 音檔 (.wav)
                 │
                 ▼
-[Jetson Thor: faster-whisper large-v3]  ─→ 英文逐字稿 (.txt / .srt)
+[Jetson AGX Orin: faster-whisper (configurable)]  ─→ 英文逐字稿 (.txt / .srt / .json)
                 │
                 ▼
-[Jetson Thor: Qwen2.5 72B / Llama 3.1 70B]  ─→ 英文 Markdown 筆記
+[Jetson AGX Orin: Ollama-compatible LLM (configurable)]  ─→ 英文/繁中 Markdown 筆記
                 │
                 ▼
-          最終筆記 (.md)
+          最終筆記 (.md / .zh-TW.summary.md)
 ```
 
 ---
 
 ## 🧠 模型選擇
 
-### 1. 語音轉文字 (STT) — 在 Thor 上執行
+### 1. 語音轉文字 (STT) — 在 AGX Orin 上執行
 
 | 模型 | 大小 | 記憶體需求 | 說明 |
 |------|------|----------|------|
-| **faster-whisper large-v3-turbo** ★推薦 | 809M | ~4 GB | 速度快，品質接近 large-v3 |
+| **faster-whisper medium**（目前預設） | 769M | ~2 GB | 輕量、穩定，適合先跑通流程 |
+| faster-whisper large-v3-turbo | 809M | ~4 GB | 速度快，品質接近 large-v3 |
 | faster-whisper large-v3 | 1.5B | ~4 GB (CTranslate2) | 最高精準度 |
-| faster-whisper medium | 769M | ~2 GB | 輕量備案 |
 
 > 影片為全英文，Whisper 已設定 `language: "en"` 以提升辨識速度與準確度。
 
-### 2. 文字摘要 / 筆記生成 (LLM) — 在 Thor 上執行
+### 2. 文字摘要 / 筆記生成 (LLM) — 在 AGX Orin 上執行
 
 | 模型 | 大小 | 記憶體需求 | 說明 |
 |------|------|----------|------|
-| **Qwen2.5-72B-Instruct (Q4_K_M)** ★推薦 | ~44 GB | ~50 GB | 綜合能力最強，摘要品質高 |
+| **Qwen2.5-32B-Instruct (Q4_K_M)**（目前預設） | ~20 GB | ~24 GB | 平衡品質與速度，適合 AGX |
+| Qwen2.5-72B-Instruct (Q4_K_M) | ~44 GB | ~50 GB | 綜合能力最強，摘要品質高 |
 | Llama-3.1-70B-Instruct (Q4_K_M) | ~42 GB | ~48 GB | 英文理解力強 |
-| Qwen2.5-32B-Instruct (Q4_K_M) | ~20 GB | ~24 GB | 平衡選擇 |
 | Qwen2.5-14B-Instruct (Q4_K_M) | ~9 GB | ~12 GB | 輕量快速 |
 
-> Thor 有 128 GB 統一記憶體，可直接跑 72B Q4 量化模型。LLM 負責將英文逐字稿整理為結構化英文筆記。
+> AGX Orin 有充足的統一記憶體，可直接跑量化後的大模型。LLM 負責將英文逐字稿整理為結構化英文筆記。
 
 ---
 
-## 🔧 環境安裝（在 Jetson Orin Thor 上）
+## 🔧 環境安裝（在 Jetson AGX Orin 上）
 
 ### Step 1：安裝基礎環境
 
@@ -83,8 +83,8 @@ pip install -r requirements.txt
 # 安裝 Ollama
 curl -fsSL https://ollama.com/install.sh | sh
 
-# 下載推薦模型（約 44 GB，需要一些時間）
-ollama pull qwen2.5:72b-instruct-q4_K_M
+# 下載目前預設模型（約 20 GB，需要一些時間）
+ollama pull qwen2.5:32b-instruct-q4_K_M
 
 # 確認 Ollama 服務已啟動
 curl http://localhost:11434/api/tags
@@ -128,17 +128,104 @@ android bootcamp/
 ├── scripts/
 │   ├── 01_extract_audio.py      # Step1: 影片抽音軌
 │   ├── 02_transcribe.py         # Step2: 英文語音轉文字
-│   ├── 03_generate_notes.py     # Step3: 英文逐字稿 → 結構化英文 Markdown 筆記
+│   ├── 03_generate_notes.py     # Step3: 逐字稿 → 英文/繁中 Markdown 筆記
 │   ├── run_pipeline.py          # 一鍵全自動流程
 │   └── utils.py                 # 工具函數
 ├── videos/                      # 放入英文影片檔案
 │   └── (把 .mp4 / .mkv 放這裡)
 ├── audio/                       # 抽出的音檔
 ├── transcripts/                 # 英文逐字稿
-└── notes/                       # 結構化英文 Markdown 筆記
+└── notes/                       # 英文筆記與繁中筆記輸出
 ```
 
 ---
+
+
+## 🐳 Docker 使用（AGX 版本）
+
+### 架構說明
+
+- 程式碼放 GitHub（本 repo）
+- Docker 只負責建置與封裝執行環境（Python + FFmpeg + CUDA 版 CTranslate2）
+- 影片與輸出資料透過 volume 掛載在主機，不放進 image
+- Ollama 建議跑在 host，容器透過 `network_mode: host` 連 `http://localhost:11434/v1`
+- 本專案的 Docker 檔名為 AGX 專用：`Dockerfile.agx`、`docker-compose.agx.yml`、`run_docker_agx.sh`
+
+### 一次性準備
+
+```bash
+# 1) 確認 Docker / Docker Compose 可用
+sudo docker --version
+sudo docker compose version
+
+# 2) 確認 Ollama 已啟動（跑在 host）
+curl http://127.0.0.1:11434/api/tags
+```
+
+### 建置與執行
+
+```bash
+# 建置 image（第一次較久）
+./run_docker_agx.sh
+
+# 或分開執行
+sudo docker compose -f docker-compose.agx.yml build pipeline
+sudo docker compose -f docker-compose.agx.yml run --rm pipeline
+```
+
+### 常用參數
+
+```bash
+# 跳過已完成步驟
+./run_docker_agx.sh --skip-audio
+./run_docker_agx.sh --skip-transcribe
+./run_docker_agx.sh --skip-notes
+```
+
+### 重要說明
+
+- 目前 `Dockerfile.agx` 以 JetPack r36.5 為預設基底（AGX Orin）
+- 若你的 JetPack 版本不同，請調整 `BASE_IMAGE`
+- `videos/ audio/ transcripts/ notes/` 都是主機目錄，重建容器不會丟資料
+
+## 📦 發佈到 Docker Hub
+
+### 1) 登入 Docker Hub
+
+```bash
+sudo docker login
+```
+
+### 2) 建置與打標籤（ARM64 / Jetson）
+
+```bash
+# 例：你的 Docker Hub 帳號是 myname
+sudo docker compose -f docker-compose.agx.yml build pipeline
+sudo docker tag android-bootcamp-converter:jetson-agx myname/android-bootcamp-converter:jetpack6-r36.5-agx
+```
+
+### 3) 推送
+
+```bash
+sudo docker push myname/android-bootcamp-converter:jetpack6-r36.5-agx
+```
+
+### 4) 目標機器使用
+
+```bash
+# 拉 image
+sudo docker pull myname/android-bootcamp-converter:jetpack6-r36.5-agx
+
+# 在專案目錄執行（需準備 config.yaml + videos）
+sudo docker run --rm --runtime nvidia --network host --ipc host   -v $PWD/videos:/app/videos   -v $PWD/audio:/app/audio   -v $PWD/transcripts:/app/transcripts   -v $PWD/notes:/app/notes   -v $PWD/config.yaml:/app/config.yaml   myname/android-bootcamp-converter:jetpack6-r36.5-agx
+```
+
+### 版本管理建議
+
+- 不要只用 `latest`，建議固定 tag：`jetpack6-r36.5-agx-v1`
+- 每次環境有變動（CUDA / ctranslate2 / requirements）就升版 tag
+- README 寫清楚「哪個 tag 對應哪個 JetPack」
+
 
 ## 🚀 使用方式
 
@@ -185,12 +272,13 @@ python scripts/run_pipeline.py --skip-notes         # 跳過筆記生成
 
 | 設定項 | 目前值 | 說明 |
 |-------|--------|------|
-| `whisper.model` | `large-v3-turbo` | Whisper 模型大小 |
+| `whisper.model` | `medium` | Whisper 模型大小（目前預設） |
 | `whisper.language` | `en` | 英文影片 |
 | `whisper.device` | `cuda` | 使用 GPU 加速 |
-| `llm.model` | `qwen2.5:72b-instruct-q4_K_M` | LLM 模型 |
+| `llm.model` | `qwen2.5:32b-instruct-q4_K_M` | LLM 模型（目前預設） |
 | `llm.api_base` | `http://localhost:11434/v1` | Ollama 本地端點 |
-| `notes.language` | `en` | 輸出英文筆記 |
+| `notes.language` | `en` | 主輸出語言（英文） |
+| `notes.generate_zh_summary` | `true` | 額外產生繁中筆記檔 |
 
 ---
 
@@ -213,10 +301,10 @@ python scripts/run_pipeline.py --skip-notes         # 跳過筆記生成
                   ▼
 ┌─────────────────────────────────────────────────────────────┐
 │  Step 2: faster-whisper 英文語音辨識                          │
-│  • 模型：large-v3-turbo                                      │
-│  • 運算裝置：Jetson Orin Thor (CUDA)                          │
+│  • 模型：依 config.yaml（目前預設 medium）                     │
+│  • 運算裝置：Jetson AGX Orin (CUDA)                          │
 │  • 輸入語言：英文 (language: "en")                             │
-│  • 輸出：含時間戳記的英文逐字稿                                 │
+│  • 輸出：含時間戳記的英文逐字稿（.json/.txt/.srt）              │
 │  • 預估速度：1小時影片 ≈ 3~8 分鐘                              │
 └─────────────────┬───────────────────────────────────────────┘
                   │
@@ -224,26 +312,27 @@ python scripts/run_pipeline.py --skip-notes         # 跳過筆記生成
 ┌─────────────────────────────────────────────────────────────┐
 │  Step 3: LLM 生成結構化筆記                                    │
 │  • 將英文逐字稿分段（每段 ~3000 字）送入 LLM                    │
-│  • LLM 依照 Prompt 模板整理為結構化英文 Markdown                 │
-│  • 運算裝置：Jetson Orin Thor (Ollama)                        │
-│  • 模型：Qwen2.5-72B Q4                                      │
-│  • 最後合併各段筆記為一份完整 .md                               │
+│  • LLM 依照 Prompt 模板整理為結構化 Markdown                     │
+│  • 運算裝置：Jetson AGX Orin (Ollama)                        │
+│  • 模型：依 config.yaml（目前預設 qwen2.5:32b-instruct-q4_K_M） │
+│  • 最後合併為英文筆記 + 繁中筆記                                │
 └─────────────────┬───────────────────────────────────────────┘
                   │
                   ▼
 ┌─────────────────────────────────────────────────────────────┐
-│  輸出：結構化英文 Markdown 筆記                                │
-│  • 標題、課程摘要                                            │
+│  輸出：結構化 Markdown 筆記                                    │
+│  • 英文筆記：標題、課程摘要                                    │
 │  • 核心知識點                                                │
 │  • 分段筆記（含時間戳記）                                      │
 │  • 程式碼片段（自動偵測並格式化）                                │
 │  • 關鍵術語、重點整理、Q&A                                    │
+│  • 繁中筆記：同架構章節與詳細筆記                               │
 └─────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 📊 效能預估（Jetson Orin Thor）
+## 📊 效能預估（Jetson AGX Orin）
 
 | 影片長度 | 抽音軌 | 語音轉文字 | LLM 筆記生成 | 總計 |
 |---------|--------|----------|-------------|------|
@@ -251,7 +340,7 @@ python scripts/run_pipeline.py --skip-notes         # 跳過筆記生成
 | 1 小時 | ~5 秒 | ~5 分鐘 | ~6 分鐘 | **~11 分鐘** |
 | 2 小時 | ~8 秒 | ~10 分鐘 | ~12 分鐘 | **~22 分鐘** |
 
-> 不需翻譯，直接英文→英文整理，速度更快
+> 目前流程同時輸出英文與繁中筆記；若僅保留英文可更快完成
 
 ---
 
