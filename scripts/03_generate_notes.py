@@ -206,6 +206,21 @@ CODE_EVIDENCE_PATTERNS = [
     r"\{[^}]{0,120}\}",
 ]
 
+SLIDE_RETRIEVAL_STOPWORDS = {
+    "the", "and", "for", "with", "that", "this", "from", "are", "you", "your",
+    "have", "has", "was", "were", "will", "can", "not", "but", "all", "any",
+    "into", "about", "they", "their", "there", "then", "than", "just", "also",
+    "what", "when", "where", "which", "while", "how", "why", "use", "using",
+    "android", "bootcamp", "2026", "session", "track", "team", "today", "next",
+    "our", "its", "it's", "we", "to", "of", "in", "on", "at", "by", "or", "as",
+}
+
+SLIDE_TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z0-9_+\-]{1,}")
+SLIDE_NOISE_LINE_PATTERNS = [
+    re.compile(r"proprietary and confidential", re.IGNORECASE),
+    re.compile(r"do not distribute", re.IGNORECASE),
+]
+
 def get_system_prompt(language: str) -> str:
     """Get system prompt based on language setting"""
     return SYSTEM_PROMPT_DEFAULT
@@ -362,6 +377,275 @@ def _extract_duration_from_markdown(markdown_text: str, fallback: str = "00:00")
     return fallback
 
 
+def _normalize_slide_text(text: str) -> str:
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    lines = []
+    for raw_line in text.split("\n"):
+        line = re.sub(r"[ \t]+", " ", raw_line).strip()
+        if not line:
+            lines.append("")
+            continue
+        if any(pat.search(line) for pat in SLIDE_NOISE_LINE_PATTERNS):
+            continue
+        lines.append(line)
+    text = "\n".join(lines)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
+def _tokenize_slide_text(text: str) -> set[str]:
+    tokens = []
+    for token in SLIDE_TOKEN_RE.findall(text.lower()):
+        if len(token) < 2:
+            continue
+        if token in SLIDE_RETRIEVAL_STOPWORDS:
+            continue
+        tokens.append(token)
+    return set(tokens)
+
+
+def _build_slide_blocks(slides_text: str, config: dict) -> list[dict]:
+    llm_cfg = config.get("llm", {})
+    block_chars = int(llm_cfg.get("slides_block_chars", 1400))
+    block_overlap = int(llm_cfg.get("slides_block_overlap", 120))
+    min_block_chars = int(llm_cfg.get("slides_min_block_chars", 140))
+    pages = [p for p in slides_text.split("\f") if p.strip()]
+
+    blocks: list[dict] = []
+
+    def add_block(label: str, text: str, page: int | None, part: int | None) -> None:
+        normalized = _normalize_slide_text(text)
+        if not normalized:
+            return
+        if len(normalized) < min_block_chars:
+            return
+        tokens = _tokenize_slide_text(normalized)
+        if not tokens:
+            return
+        blocks.append({
+            "label": label,
+            "text": normalized,
+            "tokens": tokens,
+            "page": page,
+            "part": part,
+        })
+
+    if pages:
+        for page_idx, page_text in enumerate(pages, 1):
+            normalized = _normalize_slide_text(page_text)
+            if not normalized:
+                continue
+            if len(normalized) <= block_chars:
+                add_block(f"Slide Page {page_idx}", normalized, page=page_idx, part=1)
+            else:
+                subchunks = chunk_text(normalized, block_chars, block_overlap)
+                for sub_idx, sub in enumerate(subchunks, 1):
+                    add_block(f"Slide Page {page_idx}.{sub_idx}", sub, page=page_idx, part=sub_idx)
+    else:
+        if len(slides_text) <= block_chars:
+            add_block("Slide Segment 1", slides_text, page=None, part=1)
+        else:
+            subchunks = chunk_text(slides_text, block_chars, block_overlap)
+            for idx, sub in enumerate(subchunks, 1):
+                add_block(f"Slide Segment {idx}", sub, page=None, part=idx)
+
+    return blocks
+
+
+def _score_slide_block(query_tokens: set[str], block_tokens: set[str], block_text: str) -> tuple[int, int]:
+    overlap = query_tokens & block_tokens
+    if not overlap:
+        return 0, 0
+    overlap_count = len(overlap)
+    lexical = sum(min(len(token), 12) for token in overlap)
+    length_bonus = min(len(block_text) // 180, 6) * 2
+    score = lexical + overlap_count * 4 + length_bonus
+    return score, overlap_count
+
+
+def _expand_slide_snippet(slide_blocks: list[dict], center_idx: int, min_chars: int, max_chars: int) -> str:
+    if not slide_blocks:
+        return ""
+    center = slide_blocks[center_idx]
+    page = center.get("page")
+    center_text = center["text"].strip()
+    if not center_text:
+        return ""
+
+    selected_indices = [center_idx]
+    selected_index_set = {center_idx}
+    total = len(center_text)
+
+    def try_add(idx: int, prepend: bool, require_same_page: bool) -> bool:
+        nonlocal total
+        if idx < 0 or idx >= len(slide_blocks):
+            return False
+        if idx in selected_index_set:
+            return False
+
+        candidate = slide_blocks[idx]
+        if require_same_page and page is not None and candidate.get("page") != page:
+            return False
+
+        segment = candidate["text"].strip()
+        if not segment:
+            return False
+        if total + len(segment) > max_chars:
+            return False
+
+        if prepend:
+            selected_indices.insert(0, idx)
+        else:
+            selected_indices.append(idx)
+        selected_index_set.add(idx)
+        total += len(segment)
+        return True
+
+    # Pass 1: expand around the center within the same page first.
+    step = 1
+    while total < min_chars and (center_idx - step >= 0 or center_idx + step < len(slide_blocks)):
+        right_idx = center_idx + step
+        left_idx = center_idx - step
+        took = False
+        took = try_add(right_idx, prepend=False, require_same_page=True) or took
+        if total < min_chars:
+            took = try_add(left_idx, prepend=True, require_same_page=True) or took
+        step += 1
+        if not took and left_idx < 0 and right_idx >= len(slide_blocks):
+            break
+
+    # Pass 2: if same-page content is still too short, expand to nearby pages.
+    if total < min_chars:
+        step = 1
+        while total < min_chars and (center_idx - step >= 0 or center_idx + step < len(slide_blocks)):
+            right_idx = center_idx + step
+            left_idx = center_idx - step
+            took = False
+            took = try_add(right_idx, prepend=False, require_same_page=False) or took
+            if total < min_chars:
+                took = try_add(left_idx, prepend=True, require_same_page=False) or took
+            step += 1
+            if not took and left_idx < 0 and right_idx >= len(slide_blocks):
+                break
+
+    collected = [
+        slide_blocks[idx]["text"].strip()
+        for idx in selected_indices
+        if slide_blocks[idx]["text"].strip()
+    ]
+    text = "\n\n".join(collected)
+    if len(text) > max_chars:
+        return text[:max_chars] + "\n...[truncated]"
+    return text
+
+
+def _build_slides_context_block_for_chunk(chunk_text_input: str, slide_blocks: list[dict], config: dict) -> str:
+    if not slide_blocks:
+        return ""
+
+    llm_cfg = config.get("llm", {})
+    top_k = int(llm_cfg.get("slides_top_k_per_chunk", 3))
+    per_snippet_chars = int(llm_cfg.get("slides_snippet_max_chars", 900))
+    min_snippet_chars = int(llm_cfg.get("slides_min_snippet_chars", 450))
+    min_accepted_snippet_chars = int(
+        llm_cfg.get("slides_min_accepted_snippet_chars", max(220, min_snippet_chars // 2))
+    )
+    total_chars_cap = int(llm_cfg.get("slides_context_chars_per_chunk", 2600))
+    min_score = int(llm_cfg.get("slides_retrieval_min_score", 10))
+    min_overlap_terms = int(llm_cfg.get("slides_min_overlap_terms", 2))
+    prefer_page_diversity = bool(llm_cfg.get("slides_prefer_page_diversity", False))
+
+    query_tokens = _tokenize_slide_text(chunk_text_input)
+    if not query_tokens:
+        return ""
+
+    scored = []
+    for idx, block in enumerate(slide_blocks):
+        score, overlap_count = _score_slide_block(query_tokens, block["tokens"], block["text"])
+        if score > 0 and overlap_count >= min_overlap_terms:
+            scored.append((score, overlap_count, idx, block))
+
+    if not scored:
+        return ""
+
+    scored.sort(key=lambda item: (item[0], item[1]), reverse=True)
+    if scored[0][0] < min_score:
+        return ""
+
+    candidate_pool = scored[: max(top_k * 8, 12)]
+    candidates = []
+    for score, overlap_count, idx, block in candidate_pool:
+        snippet = _expand_slide_snippet(
+            slide_blocks,
+            center_idx=idx,
+            min_chars=min_snippet_chars,
+            max_chars=per_snippet_chars,
+        )
+        if not snippet:
+            continue
+        snippet_len = len(snippet.strip())
+        if snippet_len < min_accepted_snippet_chars:
+            continue
+        candidates.append((score, overlap_count, snippet_len, idx, block, snippet))
+
+    # Fallback: avoid returning empty context when slides are globally sparse.
+    if not candidates:
+        fallback_pool = scored[: max(top_k * 3, 6)]
+        for score, overlap_count, idx, block in fallback_pool:
+            snippet = _expand_slide_snippet(
+                slide_blocks,
+                center_idx=idx,
+                min_chars=min_snippet_chars,
+                max_chars=per_snippet_chars,
+            )
+            if not snippet:
+                continue
+            snippet_len = len(snippet.strip())
+            if snippet_len < 120:
+                continue
+            candidates.append((score, overlap_count, snippet_len, idx, block, snippet))
+            if len(candidates) >= top_k:
+                break
+
+    if not candidates:
+        return ""
+
+    candidates.sort(key=lambda item: (item[0], item[1], item[2]), reverse=True)
+
+    selected_blocks = []
+    used_chars = 0
+    used_pages: set[int | None] = set()
+    used_indices: set[int] = set()
+    for score, overlap_count, snippet_len, idx, block, snippet in candidates:
+        if idx in used_indices:
+            continue
+        page = block.get("page")
+        if prefer_page_diversity and page in used_pages and len(selected_blocks) < top_k - 1:
+            continue
+        formatted = (
+            f"[{block['label']} | relevance {score} | overlap {overlap_count}]\n"
+            f"{snippet}"
+        )
+        if used_chars + len(formatted) > total_chars_cap and selected_blocks:
+            continue
+        selected_blocks.append(formatted)
+        used_chars += len(formatted)
+        used_pages.add(page)
+        used_indices.add(idx)
+        if len(selected_blocks) >= top_k:
+            break
+
+    if not selected_blocks:
+        return ""
+
+    return (
+        "Relevant slide snippets for this transcript chunk "
+        "(already retrieved by keyword overlap, use only when relevant):\n\n"
+        + "\n\n---\n\n".join(selected_blocks)
+        + "\n"
+    )
+
+
 def _get_zh_settings(config: dict, default_model: str) -> dict:
     llm_cfg = config.get("llm", {})
     notes_cfg = config.get("notes", {})
@@ -384,7 +668,6 @@ def _get_zh_settings(config: dict, default_model: str) -> dict:
 def _load_slides_context(video_title: str, config: dict) -> str:
     paths_cfg = config.get("paths", {})
     slides_dir_name = paths_cfg.get("slides_dir", "slides")
-    max_chars = config.get("llm", {}).get("slides_max_chars", 8000)
     root = get_project_root()
     slides_dir = root / slides_dir_name
 
@@ -417,9 +700,6 @@ def _load_slides_context(video_title: str, config: dict) -> str:
     raw = raw.strip()
     if not raw:
         return ""
-
-    if len(raw) > max_chars:
-        raw = raw[:max_chars]
 
     return raw
 
@@ -537,9 +817,12 @@ def generate_zh_notes_from_english_notes(
 """
 
 
-def process_transcript(transcript_json_path: Path, config: dict,
-                       client: OpenAI) -> tuple[str, str]:
-    """處理一份逐字稿，生成 Markdown 筆記。"""
+def build_english_notes_from_transcript(
+    transcript_json_path: Path,
+    config: dict,
+    client: OpenAI,
+) -> tuple[str, str, str, str]:
+    """處理一份逐字稿，生成英文 Markdown 筆記。"""
     llm_cfg = config.get("llm", {})
     notes_cfg = config.get("notes", {})
     model = llm_cfg.get("model", "qwen2.5:7b-instruct-q4_K_M")
@@ -550,7 +833,7 @@ def process_transcript(transcript_json_path: Path, config: dict,
     include_timestamps = notes_cfg.get("include_timestamps", True)
     generate_summary = notes_cfg.get("generate_summary", True)
     generate_qa = notes_cfg.get("generate_qa", True)
-    generate_zh_notes = notes_cfg.get("generate_zh_summary", True)
+    use_slides_context = notes_cfg.get("use_slides_context", True)
 
     video_title = transcript_json_path.stem
     system_prompt = get_system_prompt(language)
@@ -558,9 +841,17 @@ def process_transcript(transcript_json_path: Path, config: dict,
     with open(transcript_json_path, "r", encoding="utf-8") as f:
         segments = json.load(f)
 
-    slides_context = _load_slides_context(video_title, config)
-    if slides_context:
-        print(f"  ✓ 載入 slides 內容（{len(slides_context)} 字）")
+    slide_blocks = []
+    if use_slides_context:
+        slides_context = _load_slides_context(video_title, config)
+        if slides_context:
+            print(f"  ✓ 載入 slides 內容（{len(slides_context)} 字）")
+            slide_blocks = _build_slide_blocks(slides_context, config)
+            print(f"  ✓ slides 已建立檢索索引（{len(slide_blocks)} 段）")
+        else:
+            print("  ℹ 未找到可用 slides，改為僅使用逐字稿")
+    else:
+        print("  ⏭ 已關閉 slides 參考（notes.use_slides_context = false）")
 
     if include_timestamps:
         full_text = "\n".join(
@@ -580,12 +871,7 @@ def process_transcript(transcript_json_path: Path, config: dict,
     for i, chunk in enumerate(chunks, 1):
         print(f"\n  📝 段落 {i}/{total_chunks} 開始")
         code_policy = _build_code_policy(_chunk_has_code_evidence(chunk), language="en")
-        slides_context_block = ""
-        if slides_context:
-            slides_context_block = (
-                "Slide context (optional, use only when relevant):\n\n"
-                f"{slides_context}\n"
-            )
+        slides_context_block = _build_slides_context_block_for_chunk(chunk, slide_blocks, config)
 
         user_prompt = CHUNK_PROMPT_TEMPLATE.format(
             chunk_num=i,
@@ -663,6 +949,22 @@ def process_transcript(transcript_json_path: Path, config: dict,
 {combined_notes}
 """
 
+    return final_md, combined_notes, total_duration, model
+
+
+def process_transcript(transcript_json_path: Path, config: dict,
+                       client: OpenAI) -> tuple[str, str]:
+    """處理一份逐字稿，生成英文與中文 Markdown 筆記。"""
+    notes_cfg = config.get("notes", {})
+    generate_zh_notes = notes_cfg.get("generate_zh_summary", True)
+    video_title = transcript_json_path.stem
+
+    final_md, combined_notes, total_duration, model = build_english_notes_from_transcript(
+        transcript_json_path,
+        config,
+        client,
+    )
+
     zh_summary_md = ""
     if generate_zh_notes:
         zh_summary_md = generate_zh_notes_from_english_notes(
@@ -687,6 +989,8 @@ def main():
     transcripts_dir = root / config["paths"]["transcripts_dir"]
     notes_dir = root / config["paths"]["notes_dir"]
     llm_cfg = config.get("llm", {})
+    notes_cfg = config.get("notes", {})
+    generate_zh_notes = notes_cfg.get("generate_zh_summary", True)
 
     api_base = llm_cfg.get("api_base", "http://localhost:11434/v1")
     api_key = llm_cfg.get("api_key", "not-needed")
@@ -725,6 +1029,11 @@ def main():
         zh_summary_path = notes_dir / f"{stem}.zh-TW.summary.md"
 
         if output_path.exists():
+            if not generate_zh_notes:
+                print(f"⏭ 跳過（英文已存在，且已關閉中文）：{stem}")
+                success_count += 1
+                continue
+
             # 英文已存在時，僅補跑中文，避免重跑英文流程。
             zh_ready = False
             if zh_summary_path.exists():
@@ -772,23 +1081,40 @@ def main():
         print(f"📓 處理：{stem}")
 
         try:
-            markdown_en, markdown_zh = process_transcript(transcript_path, config, client)
+            markdown_en, english_source, duration, model_name = build_english_notes_from_transcript(
+                transcript_path,
+                config,
+                client,
+            )
 
             with open(output_path, "w", encoding="utf-8") as f:
                 f.write(markdown_en)
-
-            if markdown_zh:
-                with open(zh_summary_path, "w", encoding="utf-8") as f:
-                    f.write(markdown_zh)
-
             print(f"  ✓ 英文筆記已儲存：{output_path.name}")
-            if markdown_zh:
-                print(f"  ✓ 中文筆記已儲存：{zh_summary_path.name}")
-            success_count += 1
 
         except Exception as e:
             print(f"  ✗ 錯誤：{e}")
             fail_count += 1
+            continue
+
+        if generate_zh_notes:
+            try:
+                markdown_zh = generate_zh_notes_from_english_notes(
+                    english_source,
+                    stem,
+                    duration,
+                    config,
+                    client,
+                    model_name,
+                )
+                with open(zh_summary_path, "w", encoding="utf-8") as f:
+                    f.write(markdown_zh)
+                print(f"  ✓ 中文筆記已儲存：{zh_summary_path.name}")
+            except Exception as e:
+                print(f"  ⚠ 中文筆記生成失敗（英文已完成）：{e}")
+        else:
+            print("  ⏭ 已關閉中文筆記生成（notes.generate_zh_summary = false）")
+
+        success_count += 1
 
     print(f"\n{'=' * 50}")
     print(f"完成！成功：{success_count}，失敗：{fail_count}")

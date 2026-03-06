@@ -90,8 +90,21 @@ llm:
   # 最大重試次數
   max_retries: 3
 
-  # 可選：slides 融合時最多讀取字元數（避免 prompt 過長）
-  slides_max_chars: 8000
+  # slides 檢索：先把 slides 切成小段，再針對每個 transcript chunk 取 top-k
+  slides_block_chars: 1400
+  slides_block_overlap: 120
+  # 建議 2：優先每段提供較完整脈絡，而不是塞太多短片段
+  slides_top_k_per_chunk: 2
+  slides_snippet_max_chars: 900
+  slides_min_snippet_chars: 450
+  # 最終要送進 prompt 的片段最小可用長度；太短會被淘汰（fallback 除外）
+  slides_min_accepted_snippet_chars: 320
+  slides_context_chars_per_chunk: 2600
+  slides_retrieval_min_score: 10
+  slides_min_overlap_terms: 2
+  slides_min_block_chars: 140
+  # false: 允許同頁多段，避免為了湊頁面多樣性而挑到過短內容
+  slides_prefer_page_diversity: false
 
 # --- 中文筆記生成設定（小模型友善） ---
 llm_zh:
@@ -118,6 +131,9 @@ llm_zh:
 notes:
   # 筆記語言: "zh-TW" (繁體中文), "en" (英文)
   language: "en"
+
+  # 是否啟用 slides 內容作為逐段參考（關閉可僅依逐字稿生成）
+  use_slides_context: true
   
   # 是否在筆記中包含時間戳記
   include_timestamps: true
@@ -132,7 +148,7 @@ notes:
   generate_qa: true
 
   # 是否額外生成繁中筆記（含摘要與詳細筆記，台灣慣用詞）
-  generate_zh_summary: false
+  generate_zh_summary: true
 
   # 中文術語偏好（可持續擴充）
   zh_glossary:

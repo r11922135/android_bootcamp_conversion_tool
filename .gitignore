@@ -33,7 +33,7 @@ videos/*.wmv
 # Generated output
 audio/
 transcripts/
-notes/
+notes*/
 slides/
 tmp/
 temp/

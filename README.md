@@ -278,6 +278,7 @@ python scripts/run_pipeline.py --skip-notes         # 跳過筆記生成
 | `llm.model` | `qwen2.5:32b-instruct-q4_K_M` | LLM 模型（目前預設） |
 | `llm.api_base` | `http://localhost:11434/v1` | Ollama 本地端點 |
 | `notes.language` | `en` | 主輸出語言（英文） |
+| `notes.use_slides_context` | `true` | 是否啟用 slides 參考（可關閉） |
 | `notes.generate_zh_summary` | `true` | 額外產生繁中筆記檔 |
 
 ---
