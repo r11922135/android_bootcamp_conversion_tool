@@ -31,6 +31,7 @@ from utils import (
 # ============================================================
 
 SYSTEM_PROMPT_DEFAULT = """You are a professional Android development technical writer. Your task is to convert course transcripts into structured, readable Markdown notes in English.
+The output is generated chunk-by-chunk and later concatenated, so each chunk must be merge-friendly and avoid boilerplate repetition.
 
 ## Output requirements:
 1. Write in clear, professional English
@@ -42,13 +43,14 @@ SYSTEM_PROMPT_DEFAULT = """You are a professional Android development technical 
 7. Filter out filler words (um, uh, you know, like, so, etc.)
 8. Add context to make notes self-contained and independently readable
 9. Ignore non-verbal transcript cues like [Music], [Applause], [Laughter], intro/outro jingles, and pure ambience descriptions unless they are technically relevant
+10. Prefer concrete facts: feature/API name, behavior, constraints, owner, version, timeline
+11. Avoid generic narrative filler and template phrases
 
-## Note structure:
-- Brief topic introduction
-- Core concepts and explanations
-- Step-by-step instructions (if applicable)
-- Code examples (properly formatted)
-- Key takeaways (bullet points)"""
+## Style constraints:
+- Do not use generic lead-ins such as "This section covers", "In this section", or "The transcript highlights".
+- Avoid generic headings such as `Introduction`, `Overview`, `Conclusion`, `Key Takeaways`, or `Relevant Slide Snippets` unless the source explicitly uses that section title.
+- Do not repeat the course title inside chunk output.
+- If chunk overlap repeats information, keep only the most specific version once and move on."""
 
 CHUNK_PROMPT_TEMPLATE = """Below is a transcript segment ({chunk_num}/{total_chunks}) from an Android development course.
 Please convert it into structured Markdown notes.
@@ -65,6 +67,7 @@ Transcript:
 ---
 
 Please generate structured Markdown notes based on the transcript above. Guidelines:
+- Start directly with a topic-specific heading; no preamble sentence about what the section will cover
 - Properly format any code snippets with correct language tags
 - Use `backtick` for Android API names, class names, and method names
 - Organize key concepts using concise bullet points
@@ -74,6 +77,9 @@ Please generate structured Markdown notes based on the transcript above. Guideli
 - Exclude logistics/housekeeping content (welcome speech, break times, host intros, NDA reminders) unless technically relevant
 - Prioritize high-signal content: what changed, why it matters, and what action is required
 - Avoid repeating the same takeaway in multiple headings
+- Do not output boilerplate lines like "This section covers..."
+- Do not create standalone sections named "Introduction", "Key Takeaways", or "Relevant Slide Snippets"
+- If slide context is useful, integrate facts inline and cite as `[Slide Page X]`; do not add a separate "Slide Reference" section
 {code_policy}"""
 
 ZH_REWRITE_CHUNK_PROMPT_TEMPLATE = """以下是英文版技術筆記片段（{chunk_num}/{total_chunks}）。
@@ -773,12 +779,6 @@ def generate_zh_notes_from_english_notes(
 
     print("\n  🇹🇼 生成繁中課程摘要...")
     zh_input = combined_notes_zh
-    if len(zh_input) > 6000:
-        zh_input = (
-            zh_input[:3000]
-            + "\n\n[...content omitted...]\n\n"
-            + zh_input[-3000:]
-        )
 
     zh_qa_part = ZH_QA_SECTION if settings["generate_qa"] else ""
     zh_prompt = ZH_SUMMARY_PROMPT_TEMPLATE.format(
@@ -909,13 +909,6 @@ def build_english_notes_from_transcript(
     notes_for_summary = combined_notes
     if generate_summary:
         print("\n  📋 生成課程摘要...")
-
-        if len(notes_for_summary) > 6000:
-            notes_for_summary = (
-                combined_notes[:3000]
-                + "\n\n[...content omitted...]\n\n"
-                + combined_notes[-3000:]
-            )
 
         qa_part = QA_SECTION if generate_qa else ""
         summary_prompt = SUMMARY_PROMPT_TEMPLATE.format(

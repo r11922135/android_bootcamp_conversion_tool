@@ -68,8 +68,8 @@ llm:
   api_key: "not-needed"
   
   # 模型名稱 (對應 Ollama 中的模型名)
-  # AGX Orin 64GB 建議使用 32B 模型；若記憶體充足可嘗試 72B
-  model: "qwen2.5:32b-instruct-q4_K_M"
+  # AGX Orin 64GB 建議使用 32B 級別模型；若記憶體充足可嘗試更大尺寸
+  model: "qwen3:30b"
   
   # 最大輸出 token 數
   max_tokens: 4096
@@ -109,7 +109,7 @@ llm:
 # --- 中文筆記生成設定（小模型友善） ---
 llm_zh:
   # 可留空沿用 llm.model；若要分開模型可在此指定
-  model: "qwen2.5:32b-instruct-q4_K_M"
+  model: "qwen3:30b"
 
   # 中文改寫建議較低溫，減少翻譯腔與格式漂移
   temperature: 0.15
@@ -133,7 +133,7 @@ notes:
   language: "en"
 
   # 是否啟用 slides 內容作為逐段參考（關閉可僅依逐字稿生成）
-  use_slides_context: true
+  use_slides_context: false
   
   # 是否在筆記中包含時間戳記
   include_timestamps: true
