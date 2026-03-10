@@ -31,26 +31,31 @@ from utils import (
 # ============================================================
 
 SYSTEM_PROMPT_DEFAULT = """You are a professional Android development technical writer. Your task is to convert course transcripts into structured, readable Markdown notes in English.
-The output is generated chunk-by-chunk and later concatenated, so each chunk must be merge-friendly and avoid boilerplate repetition.
+The output is generated chunk-by-chunk and later concatenated, so each chunk must be merge-friendly, evidence-grounded, and avoid boilerplate repetition.
 
 ## Output requirements:
 1. Write in clear, professional English
 2. Use clear heading hierarchy (##, ###, ####)
 3. Bold important concepts: **concept**
-4. Use proper code blocks with language tags (```kotlin, ```java, ```xml)
+4. If code blocks are allowed for this run and the source explicitly contains code, use proper code blocks with language tags (```kotlin, ```java, ```xml)
 5. Use bullet points for key takeaways
-6. Keep important timestamps [MM:SS]
+6. Keep timestamps only when they materially help locate an important announcement, requirement, transition, or claim
 7. Filter out filler words (um, uh, you know, like, so, etc.)
 8. Add context to make notes self-contained and independently readable
 9. Ignore non-verbal transcript cues like [Music], [Applause], [Laughter], intro/outro jingles, and pure ambience descriptions unless they are technically relevant
 10. Prefer concrete facts: feature/API name, behavior, constraints, owner, version, timeline
 11. Avoid generic narrative filler and template phrases
+12. Preserve certainty level from source: `Available`, `Preview`, `Planned/Targeted`, `Call to action`, or uncertain / needs verification
+13. If the source is fragmentary or ambiguous, stay conservative and avoid inventing precision
 
 ## Style constraints:
 - Do not use generic lead-ins such as "This section covers", "In this section", or "The transcript highlights".
 - Avoid generic headings such as `Introduction`, `Overview`, `Conclusion`, `Key Takeaways`, or `Relevant Slide Snippets` unless the source explicitly uses that section title.
 - Do not repeat the course title inside chunk output.
-- If chunk overlap repeats information, keep only the most specific version once and move on."""
+- If chunk overlap repeats information, keep only the most specific version once and move on.
+- Do not turn plans, targets, requests for feedback, or early previews into shipped facts.
+- Do not invent business impact, action items, timelines, or requirements unless the speaker states them.
+- Do not output orphan headings, broken titles, half-finished bullets, or partial sentences."""
 
 CHUNK_PROMPT_TEMPLATE = """Below is a transcript segment ({chunk_num}/{total_chunks}) from an Android development course.
 Please convert it into structured Markdown notes.
@@ -67,18 +72,28 @@ Transcript:
 ---
 
 Please generate structured Markdown notes based on the transcript above. Guidelines:
+- Treat the transcript as the only evidence source for this chunk; do not add outside knowledge
+- This chunk may begin or end mid-thought because of chunking; write only complete notes you can support and skip dangling fragments instead of guessing
 - Start directly with a topic-specific heading; no preamble sentence about what the section will cover
+- Use topic headings that will merge cleanly with neighboring chunks; if this chunk clearly continues the same topic, reuse a precise heading instead of inventing a recap heading
 - Properly format any code snippets with correct language tags
 - Use `backtick` for Android API names, class names, and method names
 - Organize key concepts using concise bullet points
-- Keep important timestamps [MM:SS]
+- Keep timestamps sparingly, only when they materially help the reader locate an important point
+- Prefer at most one timestamp for a coherent bullet or subsection; do not attach timestamps to every supporting bullet
+- Omit timestamps for routine explanatory details when the surrounding section is already clearly anchored
+- Preserve certainty exactly: if something is planned, targeted, previewed, or a request for feedback, label it that way rather than stating it as current fact
+- If a claim is plausible but not explicit, either omit it or mark it `(Needs Verification)`
 - Ignore non-content cues such as [Music], [Applause], and stage/ambience markers
 - If a passage appears to be song lyrics or intermission music, omit it unless it contains technical content
 - Exclude logistics/housekeeping content (welcome speech, break times, host intros, NDA reminders) unless technically relevant
 - Prioritize high-signal content: what changed, why it matters, and what action is required
+- Include "why it matters" or "action required" only when the speaker makes that implication explicit
 - Avoid repeating the same takeaway in multiple headings
+- Merge adjacent duplicate points into one heading and one bullet list
+- Every heading must be followed by at least one complete sentence or bullet
 - Do not output boilerplate lines like "This section covers..."
-- Do not create standalone sections named "Introduction", "Key Takeaways", or "Relevant Slide Snippets"
+- Do not create standalone sections named "Introduction", "Key Takeaways", "Relevant Slide Snippets", or "Course Summary"
 - If slide context is useful, integrate facts inline and cite as `[Slide Page X]`; do not add a separate "Slide Reference" section
 {code_policy}"""
 
@@ -97,15 +112,22 @@ ZH_REWRITE_CHUNK_PROMPT_TEMPLATE = """以下是英文版技術筆記片段（{ch
 改寫要求（請嚴格遵守）：
 - 不要逐句翻譯，請重組語句與段落，寫成可閱讀的技術筆記
 - 句子要自然流暢，避免翻譯腔與生硬直譯
+- 來源片段可能從段落中間切開；請整理成完整段落，若資訊殘缺就保守表述，不要補猜
 - 使用 `##` / `###` / `####` 標題階層
-- 保留重要時間戳記（例如 [MM:SS]）
-- 程式碼區塊使用正確語言標籤（```kotlin / ```java / ```xml）
+- 僅保留真正重要的時間戳記（例如重大宣布、版本時程、行動要求、主題切換）
+- 同一個小節或條列通常最多保留一個時間戳記，不要每一點都附時間
+- 一般補充說明若不影響定位，可省略時間戳記
+- 僅在本次允許輸出程式碼，且來源明確出現程式碼時，才使用正確語言標籤（```kotlin / ```java / ```xml）
 - Android API、類別、方法名稱保留英文並用 `backtick`
 - 專有名詞若難以精準翻譯，請直接保留英文
 - 絕對不要輸出簡體中文
 - 不要把整份內容包在 ```markdown code fence``` 裡
 - 內容要具備技術脈絡，不能只列翻譯句
 - 不要在每段開頭重複輸出課程大標題（例如 `# {video_title}`）
+- 嚴格保留原文確定性：已可用 / 預覽 / 規劃中 / 徵求合作或回饋；不要把規劃寫成已上線
+- 不要新增全域摘要區塊，例如「課程摘要」「本次更新」「影響與價值」
+- 合併相鄰重複內容，避免同義標題連續出現
+- 不要輸出殘缺標題、半句、孤兒條列
 {code_policy}
 
 術語偏好（可直接採用）：
@@ -115,21 +137,39 @@ ZH_REWRITE_CHUNK_PROMPT_TEMPLATE = """以下是英文版技術筆記片段（{ch
 SUMMARY_PROMPT_TEMPLATE = """You are writing a fast-read internal brief for engineering colleagues.
 They should absorb the course in a few minutes without reading full detailed notes.
 
-Generate Markdown with the exact section order below:
-1. **Course Summary** (max 3 sentences): overall theme + most important outcomes
-2. **What Changed / Announced** (5-10 bullets): only concrete updates from the notes
-3. **Why It Matters** (3-6 bullets): ecosystem/product impact
-4. **Action Items for Partners/OEMs/Developers** (3-8 bullets): explicit asks, migration work, flags, timelines, integrations
-5. **Timeline & Version Signals** (table): `Item | Version/Quarter | Status (Announced/Planned/Preview)`
-6. **Key Terms** (5-12 bullets): short practical definitions
+Return Markdown using exactly these headings and in exactly this order:
+## Course Summary
+1-2 short sentences: overall theme + most important outcomes
+## What Changed / Announced
+4-8 bullets: only concrete updates from the notes
+## Why It Matters
+2-5 bullets: ecosystem / product impact
+## Action Items for Partners/OEMs/Developers
+2-6 bullets: only explicit asks, migration work, flags, timelines, or integrations requested by speakers
+## Timeline & Version Signals
+Table with columns: `Item | Version/Quarter | Status (Announced/Planned/Preview)` and at most 6 rows
+## Key Terms
+4-8 bullets: short practical definitions
 {qa_section}
 
 Hard requirements:
 - Prioritize signal over completeness; remove housekeeping/logistics/speaker intros.
 - Exclude song lyrics, background music/intermission content, and non-technical chatter.
 - Do not repeat the same point across sections.
+- Only include claims that are explicit in the notes; do not strengthen tentative language.
+- If something is planned, targeted, or previewed, preserve that status instead of writing it as current fact.
+- `Action Items` must be explicit asks from speakers, not inferred best practices.
+- Format each `Action Items` bullet as `- **Action**: requirement / next step`.
+- Do not use audience-first labels such as `- **OEMs**:` or `- **Developers**:` as the bullet prefix.
+- Mention the responsible audience later in the sentence only when it materially clarifies the action.
+- `Why It Matters` may include cautious synthesis, but any inference must be labeled `(Inference)`.
 - If evidence is weak, label with `(Needs Verification)` instead of stating as fact.
 - Keep wording concise and specific; avoid generic filler.
+- Each bullet should be one short sentence whenever possible.
+- If output budget is tight, shorten bullets and reduce optional detail instead of omitting required sections.
+- Never end mid-sentence, mid-bullet, or mid-table.
+- Even when evidence is sparse, still output every required heading and use the fallback rules below.
+- Return only the requested sections; no title, no preface, no detailed-notes content.
 
 Fallback rules:
 - If no explicit action items exist, output `- None explicitly stated`.
@@ -143,6 +183,57 @@ Notes content:
 {full_notes}
 """
 
+EN_CLEANUP_SYSTEM_PROMPT = """You are a conservative technical editor cleaning up already-generated Android course notes.
+Your job is cleanup only. Do not add facts, examples, code, or interpretations."""
+
+EN_DETAILED_CLEANUP_PROMPT_TEMPLATE = """Below is a chunk of already-generated English Markdown notes for an Android bootcamp session.
+Clean it up conservatively.
+
+Course title: {video_title}
+
+---
+Notes chunk:
+
+{notes_chunk}
+
+---
+
+Hard rules:
+- Cleanup only; do not add any new facts, examples, explanations, section themes, timelines, or action items.
+- Do not infer missing content.
+- Do not output any code block, pseudocode, XML snippet, placeholder example, or synthetic sample.
+- Remove placeholder text such as "No content...", "No technical content...", "No notes can be generated", timestamp-only explanations, empty-content notices, and song/intermission omission notices.
+- Remove redundant timestamps when multiple nearby bullets or sentences point to the same moment; keep only the most useful timestamp.
+- Remove headings that have no meaningful content beneath them.
+- Remove incomplete bullets, dangling sentences, broken fragments, and duplicated separator blocks.
+- Merge adjacent duplicate or near-duplicate headings only when the underlying content clearly overlaps.
+- Preserve valid timestamps, factual certainty, technical terminology, and useful structure.
+- Keep the output in English Markdown only.
+- If nothing useful remains, return an empty string.
+"""
+
+EN_GLOBAL_NORMALIZE_PROMPT_TEMPLATE = """Below are cleaned English detailed notes for an Android bootcamp session.
+Perform one final conservative normalization pass.
+
+Course title: {video_title}
+
+---
+Detailed notes:
+
+{full_notes}
+
+---
+
+Hard rules:
+- Do not add any new facts or infer missing information.
+- Do not output any code block, placeholder text, empty-content notices, or synthetic examples.
+- Remove excessive timestamps; keep only timestamps that materially improve navigation.
+- Remove any remaining empty sections, duplicate headings, dangling fragments, and repeated separators.
+- Merge clearly duplicated adjacent sections while preserving chronology and technical meaning.
+- Preserve timestamps, certainty, and terminology.
+- Return Markdown only.
+"""
+
 ZH_SYSTEM_PROMPT = """你是資深技術編輯。請使用「繁體中文（台灣）」撰寫，並使用台灣慣用技術用詞與語氣（例如：影片、逐字稿、章節、重點整理、程式碼、執行、設定、效能、記憶體）。
 
 請避免中國大陸常見用語（例如：视频、脚本、内存、运行、配置、优化），也避免中英混雜與口語贅字。
@@ -151,21 +242,38 @@ ZH_SYSTEM_PROMPT = """你是資深技術編輯。請使用「繁體中文（台�
 
 ZH_SUMMARY_PROMPT_TEMPLATE = """以下是 Android 課程完整筆記。請產出「繁體中文（台灣）Markdown 快速摘要」，給工程同仁在幾分鐘內掌握重點。
 
-請輸出以下區塊（標題與順序固定）：
-1. **課程摘要**（最多 3 句）：主題與最重要成果
-2. **本次更新／新宣布事項**：5-10 點，僅列明確資訊
-3. **影響與價值**：3-6 點，說明為何重要
-4. **合作夥伴/OEM/開發者行動項**：3-8 點，列出需要做的事（遷移、設定、整合、時程）
-5. **版本與時程訊號**：表格，欄位為 `項目 | 版本/季度 | 狀態（已宣布/規劃中/預覽）`
-6. **關鍵術語**：5-12 點，簡短且實用的定義
+請只輸出以下區塊，標題文字與順序都固定：
+## 課程摘要
+1-2 句短句：主題與最重要成果
+## 本次更新／新宣布事項
+4-8 點，僅列明確資訊
+## 影響與價值
+2-5 點，說明為何重要
+## 合作夥伴/OEM/開發者行動項
+2-6 點，僅列講者明確要求的遷移、設定、整合、時程
+## 版本與時程訊號
+表格，欄位為 `項目 | 版本/季度 | 狀態（已宣布/規劃中/預覽）`，最多 6 列
+## 關鍵術語
+4-8 點，簡短且實用的定義
 {qa_section}
 
 硬性要求：
 - 以高訊號為主，不要寫主持開場、休息時間、流程提醒、保密提醒。
 - 排除歌詞、背景音樂、過場閒聊等非技術內容。
 - 各區塊不要重複同一重點。
+- 僅能寫筆記中明確出現的資訊；不要把講者的目標、預覽、規劃，寫成已經上線或既定事實。
+- 「行動項」只能列講者明確要求做的事，不能自行延伸最佳實務。
+- 「行動項」每一點都用「動作優先」格式，例如 `- **整合某 API**：補充需求或對象`。
+- 不要用 `- **OEMs**:`、`- **Developers**:` 這種以對象為前綴的格式。
+- 只有在確實有助於理解時，才在句子後半補充適用對象。
+- 「影響與價值」可做保守歸納；若屬推論請標註 `(推論)`。
 - 證據不足時請標註 `(待確認)`，不要寫成既定事實。
 - 句子要短、具體、可執行，避免空泛敘述。
+- 每個條列盡量只寫一句短句。
+- 如果輸出預算吃緊，優先縮短條列與減少次要細節，不要漏掉必要區塊。
+- 不可輸出斷句、半個條列或半張表格。
+- 即使資訊不足，也必須保留所有必要標題，並套用下方 fallback 規則。
+- 不要輸出課程標題、前言、結語，也不要混入詳細筆記內容。
 
 補充規則：
 - 若沒有明確行動項，請輸出 `- 未明確要求`。
@@ -192,6 +300,8 @@ ZH_REVIEW_PROMPT_TEMPLATE = """請修正以下繁中筆記段落，讓品質符�
 - 專有名詞若難以翻譯，直接保留英文
 - 不要輸出包住全文的 ```markdown code fence```
 - 保留原有程式碼區塊與時間戳記
+- 保留原文的確定性，不要把規劃/預覽寫成已上線
+- 修掉重複標題、殘缺標題、半句與孤兒條列
 
 原文：
 {bad_chunk}
@@ -365,12 +475,16 @@ def _chunk_has_code_evidence(text: str) -> bool:
     return False
 
 
-def _build_code_policy(has_code_evidence: bool, language: str = "en") -> str:
+def _build_code_policy(has_code_evidence: bool, allow_code_blocks: bool, language: str = "en") -> str:
     if language == "en":
+        if not allow_code_blocks:
+            return "- Do not output any code block, pseudocode, XML snippet, or inline sample code for this segment. Summarize implementation details in prose only."
         if has_code_evidence:
             return "- Include code blocks only when code is explicitly present in transcript or slides."
         return "- Do not output any code block for this segment."
 
+    if not allow_code_blocks:
+        return "- 本次禁止輸出任何 code block、偽程式碼、XML 片段或行內範例程式碼；請一律改用文字描述實作重點。"
     if has_code_evidence:
         return "- 僅在來源內容明確出現程式碼時，才保留或改寫為 code block。"
     return "- 這一段禁止輸出 code block，請改用文字說明。"
@@ -381,6 +495,101 @@ def _extract_duration_from_markdown(markdown_text: str, fallback: str = "00:00")
     if match:
         return match.group(1)
     return fallback
+
+
+def _group_note_batches(notes_text: str, max_chars: int) -> list[str]:
+    parts = [part.strip() for part in notes_text.split("\n\n---\n\n") if part.strip()]
+    if not parts:
+        return []
+
+    batches: list[str] = []
+    current_parts: list[str] = []
+    current_len = 0
+
+    for part in parts:
+        extra_len = len(part) if not current_parts else len(part) + len("\n\n---\n\n")
+        if current_parts and current_len + extra_len > max_chars:
+            batches.append("\n\n---\n\n".join(current_parts))
+            current_parts = [part]
+            current_len = len(part)
+            continue
+
+        current_parts.append(part)
+        current_len += extra_len
+
+    if current_parts:
+        batches.append("\n\n---\n\n".join(current_parts))
+
+    return batches
+
+
+def cleanup_english_detailed_notes(
+    combined_notes: str,
+    video_title: str,
+    config: dict,
+    client: OpenAI,
+    model: str,
+) -> str:
+    cleaned_source = combined_notes.strip()
+    if not cleaned_source:
+        return cleaned_source
+
+    llm_cfg = config.get("llm", {})
+    request_delay = llm_cfg.get("request_delay", 1.0)
+    cleanup_batch_chars = 9000
+    global_cleanup_limit = 18000
+
+    cleanup_batches = _group_note_batches(cleaned_source, cleanup_batch_chars)
+    if not cleanup_batches:
+        return cleaned_source
+
+    print("\n  🧹 清理英文詳細筆記...")
+    cleaned_batches: list[str] = []
+
+    for i, batch in enumerate(cleanup_batches, 1):
+        cleanup_prompt = EN_DETAILED_CLEANUP_PROMPT_TEMPLATE.format(
+            video_title=video_title,
+            notes_chunk=batch,
+        )
+        cleaned_batch = call_llm(
+            client,
+            model,
+            EN_CLEANUP_SYSTEM_PROMPT,
+            cleanup_prompt,
+            config,
+            progress_label=f"英文清理 {i}/{len(cleanup_batches)}",
+            temperature_override=0.1,
+        )
+        cleaned_batch = _unwrap_outer_markdown_fence(cleaned_batch).strip()
+        if cleaned_batch:
+            cleaned_batches.append(cleaned_batch)
+
+        if i < len(cleanup_batches):
+            time.sleep(request_delay)
+
+    if not cleaned_batches:
+        return cleaned_source
+
+    cleaned_notes = "\n\n---\n\n".join(cleaned_batches).strip()
+    if len(cleaned_notes) > global_cleanup_limit:
+        return cleaned_notes
+
+    print("\n  🧭 整理英文詳細筆記整體結構...")
+    normalize_prompt = EN_GLOBAL_NORMALIZE_PROMPT_TEMPLATE.format(
+        video_title=video_title,
+        full_notes=cleaned_notes,
+    )
+    normalized_notes = call_llm(
+        client,
+        model,
+        EN_CLEANUP_SYSTEM_PROMPT,
+        normalize_prompt,
+        config,
+        progress_label="英文整體整理",
+        temperature_override=0.1,
+    )
+    normalized_notes = _unwrap_outer_markdown_fence(normalized_notes).strip()
+    return normalized_notes or cleaned_notes
 
 
 def _normalize_slide_text(text: str) -> str:
@@ -667,6 +876,7 @@ def _get_zh_settings(config: dict, default_model: str) -> dict:
         "min_chunk_chars": llm_zh_cfg.get("min_chunk_chars", 260),
         "request_delay": llm_cfg.get("request_delay", 1.0),
         "generate_qa": notes_cfg.get("generate_qa", True),
+        "detect_code": notes_cfg.get("detect_code", True),
         "glossary_text": _build_glossary_text(notes_cfg),
     }
 
@@ -733,7 +943,11 @@ def generate_zh_notes_from_english_notes(
             total_chunks=total_zh_chunks,
             video_title=video_title,
             english_notes_chunk=en_chunk,
-            code_policy=_build_code_policy(_chunk_has_code_evidence(en_chunk), language="zh"),
+            code_policy=_build_code_policy(
+                _chunk_has_code_evidence(en_chunk),
+                allow_code_blocks=settings["detect_code"],
+                language="zh",
+            ),
             glossary_text=settings["glossary_text"],
         )
         zh_note = call_llm(
@@ -834,6 +1048,7 @@ def build_english_notes_from_transcript(
     generate_summary = notes_cfg.get("generate_summary", True)
     generate_qa = notes_cfg.get("generate_qa", True)
     use_slides_context = notes_cfg.get("use_slides_context", True)
+    detect_code = notes_cfg.get("detect_code", True)
 
     video_title = transcript_json_path.stem
     system_prompt = get_system_prompt(language)
@@ -870,7 +1085,11 @@ def build_english_notes_from_transcript(
 
     for i, chunk in enumerate(chunks, 1):
         print(f"\n  📝 段落 {i}/{total_chunks} 開始")
-        code_policy = _build_code_policy(_chunk_has_code_evidence(chunk), language="en")
+        code_policy = _build_code_policy(
+            _chunk_has_code_evidence(chunk),
+            allow_code_blocks=detect_code,
+            language="en",
+        )
         slides_context_block = _build_slides_context_block_for_chunk(chunk, slide_blocks, config)
 
         user_prompt = CHUNK_PROMPT_TEMPLATE.format(
@@ -903,6 +1122,13 @@ def build_english_notes_from_transcript(
             time.sleep(request_delay)
 
     combined_notes = "\n\n---\n\n".join(all_notes)
+    combined_notes = cleanup_english_detailed_notes(
+        combined_notes,
+        video_title,
+        config,
+        client,
+        model,
+    )
     total_duration = format_timestamp(segments[-1]["end"]) if segments else "00:00"
 
     summary_section = ""

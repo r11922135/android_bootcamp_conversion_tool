@@ -138,8 +138,8 @@ notes:
   # 是否在筆記中包含時間戳記
   include_timestamps: true
   
-  # 是否自動偵測程式碼並格式化
-  detect_code: true
+  # 是否允許筆記輸出程式碼；false 會完全禁止 code block，改以文字描述
+  detect_code: false
   
   # 是否在最後生成摘要
   generate_summary: true
