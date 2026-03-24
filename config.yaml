@@ -78,17 +78,20 @@ llm:
   temperature: 0.3
   
   # 逐字稿分段大小 (字元數)
-  # 太大可能超過 context window，太小可能丟失上下文
-  chunk_size: 3000
+  # 調大可減少 API 次數；目前預設走中等偏大分段，避免筆記過碎
+  chunk_size: 6000
   
   # 分段重疊字元數 (避免切斷段落)
-  chunk_overlap: 200
+  chunk_overlap: 120
   
   # 每次 API 呼叫之間的延遲 (秒)，避免 OOM
   request_delay: 1.0
   
   # 最大重試次數
   max_retries: 3
+
+  # 當模型因 max_tokens 截斷時，自動續寫的最多次數
+  max_continuations: 4
 
   # slides 檢索：先把 slides 切成小段，再針對每個 transcript chunk 取 top-k
   slides_block_chars: 1400
@@ -127,6 +130,20 @@ llm_zh:
   # 中文段落呼叫重試次數
   max_retries: 3
 
+# --- One-shot 英文筆記實驗設定 ---
+llm_oneshot:
+  # 預設沿用 llm.model；需要時可改成不同模型
+  model: "qwen3:30b"
+
+  # one-shot 詳細筆記需要更大的輸出預算
+  max_tokens: 12288
+
+  # 降低自由度，避免全文重寫時漂移
+  temperature: 0.2
+
+  # one-shot 呼叫重試次數
+  max_retries: 3
+
 # --- 筆記格式設定 ---
 notes:
   # 筆記語言: "zh-TW" (繁體中文), "en" (英文)
@@ -144,8 +161,8 @@ notes:
   # 是否在最後生成摘要
   generate_summary: true
   
-  # 是否在最後生成 Q&A
-  generate_qa: true
+  # 保留設定欄位；目前摘要 prompt 不再輸出 Q&A
+  generate_qa: false
 
   # 是否額外生成繁中筆記（含摘要與詳細筆記，台灣慣用詞）
   generate_zh_summary: true

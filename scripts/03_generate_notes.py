@@ -57,6 +57,32 @@ The output is generated chunk-by-chunk and later concatenated, so each chunk mus
 - Do not invent business impact, action items, timelines, or requirements unless the speaker states them.
 - Do not output orphan headings, broken titles, half-finished bullets, or partial sentences."""
 
+SYSTEM_PROMPT_ONE_SHOT = """You are a professional Android development technical writer. Your task is to convert one full Android bootcamp transcript into structured, readable Markdown notes in English.
+The output is generated in one pass for the entire session, so it must preserve the full arc of the talk, stay evidence-grounded, and avoid premature stopping.
+
+## Output requirements:
+1. Write in clear, professional English
+2. Use clear heading hierarchy (##, ###, ####)
+3. Bold important concepts: **concept**
+4. Use bullet points for key takeaways
+5. Keep timestamps only when they materially help locate an important announcement, requirement, transition, or claim
+6. Filter out filler words (um, uh, you know, like, so, etc.)
+7. Add context to make notes self-contained and independently readable
+8. Ignore non-verbal transcript cues like [Music], [Applause], [Laughter], intro/outro jingles, and pure ambience descriptions unless they are technically relevant
+9. Prefer concrete facts: feature/API name, behavior, constraints, owner, version, timeline
+10. Avoid generic narrative filler and template phrases
+11. Preserve certainty level from source: `Available`, `Preview`, `Planned/Targeted`, `Call to action`, or uncertain / needs verification
+12. If the source is fragmentary or ambiguous, stay conservative and avoid inventing precision
+
+## Style constraints:
+- Do not use generic lead-ins such as "This section covers", "In this section", or "The transcript highlights".
+- Avoid generic headings such as `Introduction`, `Overview`, `Conclusion`, `Key Takeaways`, or `Relevant Slide Snippets` unless the source explicitly uses that section title.
+- Do not repeat the course title inside the output body.
+- Do not turn plans, targets, requests for feedback, or early previews into shipped facts.
+- Do not invent business impact, action items, timelines, or requirements unless the speaker states them.
+- Do not output orphan headings, broken titles, half-finished bullets, or partial sentences.
+- Do not stop after the first few topics; cover the meaningful later-session technical sections as well."""
+
 CHUNK_PROMPT_TEMPLATE = """Below is a transcript segment ({chunk_num}/{total_chunks}) from an Android development course.
 Please convert it into structured Markdown notes.
 
@@ -79,6 +105,8 @@ Please generate structured Markdown notes based on the transcript above. Guideli
 - Properly format any code snippets with correct language tags
 - Use `backtick` for Android API names, class names, and method names
 - Organize key concepts using concise bullet points
+- Prefer medium-compression notes: capture the important technical content without restating every example, aside comment, or repeated explanation
+- Keep only the highest-signal implementation details, requirements, timelines, and platform changes; omit low-value repetition
 - Keep timestamps sparingly, only when they materially help the reader locate an important point
 - Prefer at most one timestamp for a coherent bullet or subsection; do not attach timestamps to every supporting bullet
 - Omit timestamps for routine explanatory details when the surrounding section is already clearly anchored
@@ -139,18 +167,13 @@ They should absorb the course in a few minutes without reading full detailed not
 
 Return Markdown using exactly these headings and in exactly this order:
 ## Course Summary
-1-2 short sentences: overall theme + most important outcomes
+2-3 concise sentences: overall theme + most important outcomes
 ## What Changed / Announced
 4-8 bullets: only concrete updates from the notes
 ## Why It Matters
 2-5 bullets: ecosystem / product impact
-## Action Items for Partners/OEMs/Developers
-2-6 bullets: only explicit asks, migration work, flags, timelines, or integrations requested by speakers
-## Timeline & Version Signals
-Table with columns: `Item | Version/Quarter | Status (Announced/Planned/Preview)` and at most 6 rows
 ## Key Terms
 4-8 bullets: short practical definitions
-{qa_section}
 
 Hard requirements:
 - Prioritize signal over completeness; remove housekeeping/logistics/speaker intros.
@@ -158,22 +181,17 @@ Hard requirements:
 - Do not repeat the same point across sections.
 - Only include claims that are explicit in the notes; do not strengthen tentative language.
 - If something is planned, targeted, or previewed, preserve that status instead of writing it as current fact.
-- `Action Items` must be explicit asks from speakers, not inferred best practices.
-- Format each `Action Items` bullet as `- **Action**: requirement / next step`.
-- Do not use audience-first labels such as `- **OEMs**:` or `- **Developers**:` as the bullet prefix.
-- Mention the responsible audience later in the sentence only when it materially clarifies the action.
+- Prefer slightly fuller wording over compressed shorthand when compression would make the meaning ambiguous.
+- Each bullet must be understandable on its own; explicitly name the condition, deployment tier, RAM class, API scope, or audience when that changes the meaning.
+- If a point applies only to a limited configuration, say so directly instead of implying it applies generally.
 - `Why It Matters` may include cautious synthesis, but any inference must be labeled `(Inference)`.
 - If evidence is weak, label with `(Needs Verification)` instead of stating as fact.
 - Keep wording concise and specific; avoid generic filler.
-- Each bullet should be one short sentence whenever possible.
+- Each bullet should be one short sentence whenever possible, but use two short sentences if needed to avoid ambiguity.
 - If output budget is tight, shorten bullets and reduce optional detail instead of omitting required sections.
 - Never end mid-sentence, mid-bullet, or mid-table.
-- Even when evidence is sparse, still output every required heading and use the fallback rules below.
+- Even when evidence is sparse, still output every required heading.
 - Return only the requested sections; no title, no preface, no detailed-notes content.
-
-Fallback rules:
-- If no explicit action items exist, output `- None explicitly stated`.
-- If no explicit timeline/version signals exist, output `- Not explicitly stated`.
 
 Course title: {video_title}
 
@@ -181,6 +199,73 @@ Course title: {video_title}
 Notes content:
 
 {full_notes}
+"""
+
+TRANSCRIPT_SUMMARY_PROMPT_TEMPLATE = """You are writing a fast-read internal brief for engineering colleagues.
+They should absorb the course in a few minutes without reading the full transcript.
+
+Return Markdown using exactly these headings and in exactly this order:
+## Course Summary
+2-3 concise sentences: overall theme + most important outcomes
+## What Changed / Announced
+4-8 bullets: only concrete updates from the transcript
+## Why It Matters
+2-5 bullets: ecosystem / product impact
+## Key Terms
+4-8 bullets: short practical definitions
+
+Hard requirements:
+- Use the transcript as the primary source of truth; do not add outside knowledge.
+- Cover the full session, not just the opening topics.
+- If important later-session topics exist, reflect them somewhere in the summary.
+- Prioritize signal over completeness; remove housekeeping/logistics/speaker intros.
+- Exclude song lyrics, background music/intermission content, and non-technical chatter.
+- Do not repeat the same point across sections.
+- Only include claims that are explicit in the transcript; do not strengthen tentative language.
+- If something is planned, targeted, or previewed, preserve that status instead of writing it as current fact.
+- Prefer slightly fuller wording over compressed shorthand when compression would make the meaning ambiguous.
+- Each bullet must be understandable on its own; explicitly name the condition, deployment tier, RAM class, API scope, or audience when that changes the meaning.
+- If a point applies only to a limited configuration, say so directly instead of implying it applies generally.
+- `Why It Matters` may include cautious synthesis, but any inference must be labeled `(Inference)`.
+- If evidence is weak, label with `(Needs Verification)` instead of stating as fact.
+- Keep wording concise and specific; avoid generic filler.
+- Each bullet should be one short sentence whenever possible, but use two short sentences if needed to avoid ambiguity.
+- If output budget is tight, shorten bullets and reduce optional detail instead of omitting required sections.
+- Never end mid-sentence, mid-bullet, or mid-table.
+- Even when evidence is sparse, still output every required heading.
+- Return only the requested sections; no title, no preface, no detailed-notes content.
+
+Course title: {video_title}
+
+---
+Transcript content:
+
+{full_transcript}
+"""
+
+ZH_SUMMARY_FROM_ENGLISH_PROMPT_TEMPLATE = """以下是英文版 Android 課程摘要 Markdown。請改寫成「繁體中文（台灣）」Markdown 摘要。
+
+請使用以下固定中文標題，並依照英文原文的區塊順序與重點對應：
+## 課程摘要
+## 本次更新／新宣布事項
+## 影響與價值
+## 關鍵術語
+
+硬性要求：
+- 這是根據英文摘要改寫，不是重新摘要；不要新增英文沒有的重點、時程、條件、行動項或推論。
+- 儘量保持各區塊的 bullet 數量、資訊密度與重點順序和英文一致。
+- 保留英文原文的確定性與限制條件；不要把 preview / planned / targeted / optional 寫成既定事實。
+- 若英文條列有前提條件（例如裝置等級、RAM 門檻、system API 限制、僅適用特定對象），請在中文中明確寫出，不要省略。
+- 不要混入新的全域摘要、評論或補充背景。
+- 不要輸出簡體中文。
+- 不要把整份內容包在 code fence 裡。
+
+課程名稱：{video_title}
+
+---
+英文摘要：
+
+{english_summary}
 """
 
 EN_CLEANUP_SYSTEM_PROMPT = """You are a conservative technical editor cleaning up already-generated Android course notes.
@@ -234,6 +319,42 @@ Hard rules:
 - Return Markdown only.
 """
 
+ONE_SHOT_DETAILED_PROMPT_TEMPLATE = """Below is the full transcript for one complete Android bootcamp session.
+This is the entire session transcript, not a chunk.
+
+Course title: {video_title}
+
+---
+Full transcript:
+
+{full_transcript}
+
+---
+
+Generate comprehensive English Markdown detailed notes for the full session.
+
+Hard rules:
+- Cover the full session from beginning to end; do not stop after the early topics.
+- Organize notes in chronological order by major topic shifts.
+- Output detailed notes only. Do not include `Course Summary`, `What Changed / Announced`, `Why It Matters`, `Action Items`, `Timeline & Version Signals`, `Key Terms`, or `Q&A` sections here.
+- Start directly with topic-specific `##` headings.
+- Use `###` and `####` only when they improve readability within a topic.
+- Prefer concise but complete bullets and short paragraphs.
+- Ignore housekeeping, welcomes, breaks, NDA reminders, applause, music, lyrics, and empty timestamp-only stretches.
+- Preserve factual certainty exactly as stated: available, preview, planned, targeted, request for feedback, or needs verification.
+- Do not add outside knowledge, synthetic examples, or inferred requirements.
+- Keep timestamps sparingly, only when they materially help locate an important announcement, requirement, transition, or claim.
+- Make sure later-session technical topics are included if they contain meaningful content.
+- Do not output any code block, pseudocode, XML snippet, or synthetic sample code.
+- Remove filler and repeated phrasing.
+- Do not output placeholder text such as "No content..." or explain omitted empty stretches.
+
+Coverage requirement:
+- Aim to capture every major technical section of the session with enough detail that an engineer could skim the notes and understand the full arc of the talk.
+
+{code_policy}
+"""
+
 ZH_SYSTEM_PROMPT = """你是資深技術編輯。請使用「繁體中文（台灣）」撰寫，並使用台灣慣用技術用詞與語氣（例如：影片、逐字稿、章節、重點整理、程式碼、執行、設定、效能、記憶體）。
 
 請避免中國大陸常見用語（例如：视频、脚本、内存、运行、配置、优化），也避免中英混雜與口語贅字。
@@ -249,35 +370,22 @@ ZH_SUMMARY_PROMPT_TEMPLATE = """以下是 Android 課程完整筆記。請產出
 4-8 點，僅列明確資訊
 ## 影響與價值
 2-5 點，說明為何重要
-## 合作夥伴/OEM/開發者行動項
-2-6 點，僅列講者明確要求的遷移、設定、整合、時程
-## 版本與時程訊號
-表格，欄位為 `項目 | 版本/季度 | 狀態（已宣布/規劃中/預覽）`，最多 6 列
 ## 關鍵術語
 4-8 點，簡短且實用的定義
-{qa_section}
 
 硬性要求：
 - 以高訊號為主，不要寫主持開場、休息時間、流程提醒、保密提醒。
 - 排除歌詞、背景音樂、過場閒聊等非技術內容。
 - 各區塊不要重複同一重點。
 - 僅能寫筆記中明確出現的資訊；不要把講者的目標、預覽、規劃，寫成已經上線或既定事實。
-- 「行動項」只能列講者明確要求做的事，不能自行延伸最佳實務。
-- 「行動項」每一點都用「動作優先」格式，例如 `- **整合某 API**：補充需求或對象`。
-- 不要用 `- **OEMs**:`、`- **Developers**:` 這種以對象為前綴的格式。
-- 只有在確實有助於理解時，才在句子後半補充適用對象。
 - 「影響與價值」可做保守歸納；若屬推論請標註 `(推論)`。
 - 證據不足時請標註 `(待確認)`，不要寫成既定事實。
 - 句子要短、具體、可執行，避免空泛敘述。
 - 每個條列盡量只寫一句短句。
 - 如果輸出預算吃緊，優先縮短條列與減少次要細節，不要漏掉必要區塊。
 - 不可輸出斷句、半個條列或半張表格。
-- 即使資訊不足，也必須保留所有必要標題，並套用下方 fallback 規則。
+- 即使資訊不足，也必須保留所有必要標題。
 - 不要輸出課程標題、前言、結語，也不要混入詳細筆記內容。
-
-補充規則：
-- 若沒有明確行動項，請輸出 `- 未明確要求`。
-- 若沒有明確時程訊號，請輸出 `- 未明確提及`。
 
 課程名稱：{video_title}
 
@@ -337,6 +445,111 @@ SLIDE_NOISE_LINE_PATTERNS = [
     re.compile(r"do not distribute", re.IGNORECASE),
 ]
 
+EN_REQUIRED_SUMMARY_HEADINGS = [
+    "## Course Summary",
+    "## What Changed / Announced",
+    "## Why It Matters",
+    "## Key Terms",
+]
+
+
+def _merge_continuation_text(existing: str, new_text: str) -> str:
+    if not existing:
+        return new_text
+    if not new_text:
+        return existing
+
+    max_overlap = min(len(existing), len(new_text), 200)
+    for size in range(max_overlap, 24, -1):
+        if existing[-size:] == new_text[:size]:
+            return existing + new_text[size:]
+
+    return existing + new_text
+
+
+def _split_markdown_sections(markdown_text: str) -> list[str]:
+    sections: list[str] = []
+    current: list[str] = []
+
+    for line in markdown_text.splitlines():
+        if re.match(r"^#{2,4}\s+\S", line) and current:
+            section = "\n".join(current).strip()
+            if section:
+                sections.append(section)
+            current = [line]
+            continue
+        current.append(line)
+
+    if current:
+        section = "\n".join(current).strip()
+        if section:
+            sections.append(section)
+
+    return sections
+
+
+def _split_oversized_markdown_section(section_text: str, max_chars: int, overlap: int) -> list[str]:
+    if len(section_text) <= max_chars:
+        return [section_text.strip()]
+
+    lines = section_text.splitlines()
+    heading = lines[0].strip() if lines and re.match(r"^#{2,4}\s+\S", lines[0]) else ""
+    body = "\n".join(lines[1:]).strip() if heading else section_text.strip()
+
+    if not body:
+        return [section_text.strip()]
+
+    body_budget = max_chars
+    if heading:
+        body_budget = max(600, max_chars - len(heading) - 2)
+
+    body_chunks = chunk_text(body, body_budget, overlap)
+    parts: list[str] = []
+    for chunk in body_chunks:
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        if heading:
+            parts.append(f"{heading}\n\n{chunk}".strip())
+        else:
+            parts.append(chunk)
+
+    return parts or [section_text.strip()]
+
+
+def chunk_markdown_by_sections(markdown_text: str, chunk_size: int, overlap: int) -> list[str]:
+    sections = _split_markdown_sections(markdown_text.strip())
+    if not sections:
+        return chunk_text(markdown_text, chunk_size, overlap)
+
+    batches: list[str] = []
+    current_sections: list[str] = []
+    current_len = 0
+
+    for section in sections:
+        if len(section) > chunk_size:
+            if current_sections:
+                batches.append("\n\n".join(current_sections).strip())
+                current_sections = []
+                current_len = 0
+            batches.extend(_split_oversized_markdown_section(section, chunk_size, overlap))
+            continue
+
+        extra_len = len(section) if not current_sections else len(section) + len("\n\n")
+        if current_sections and current_len + extra_len > chunk_size:
+            batches.append("\n\n".join(current_sections).strip())
+            current_sections = [section]
+            current_len = len(section)
+            continue
+
+        current_sections.append(section)
+        current_len += extra_len
+
+    if current_sections:
+        batches.append("\n\n".join(current_sections).strip())
+
+    return batches
+
 def get_system_prompt(language: str) -> str:
     """Get system prompt based on language setting"""
     return SYSTEM_PROMPT_DEFAULT
@@ -358,6 +571,7 @@ def call_llm(
     max_tokens = max_tokens_override if max_tokens_override is not None else llm_cfg.get("max_tokens", 4096)
     temperature = temperature_override if temperature_override is not None else llm_cfg.get("temperature", 0.3)
     max_retries = max_retries_override if max_retries_override is not None else llm_cfg.get("max_retries", 3)
+    max_continuations = int(llm_cfg.get("max_continuations", 4))
 
     spinner_frames = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 
@@ -383,23 +597,55 @@ def call_llm(
             heartbeat_thread.start()
 
         try:
-            response = client.chat.completions.create(
-                model=model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-                max_tokens=max_tokens,
-                temperature=temperature,
-                stream=False,
-            )
-            content = response.choices[0].message.content.strip()
+            base_messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ]
+            content = ""
+            continuation_count = 0
+
+            while True:
+                if continuation_count == 0:
+                    messages = base_messages
+                else:
+                    messages = [
+                        *base_messages,
+                        {"role": "assistant", "content": content},
+                        {
+                            "role": "user",
+                            "content": (
+                                "Continue exactly where you stopped. Do not repeat prior text, do not restart the section, "
+                                "and end only at a complete Markdown boundary."
+                            ),
+                        },
+                    ]
+
+                response = client.chat.completions.create(
+                    model=model,
+                    messages=messages,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    stream=False,
+                )
+                choice = response.choices[0]
+                chunk = choice.message.content or ""
+                finish_reason = choice.finish_reason or "stop"
+                content = _merge_continuation_text(content, chunk)
+
+                if finish_reason != "length":
+                    break
+
+                continuation_count += 1
+                if continuation_count > max_continuations:
+                    raise RuntimeError(
+                        f"LLM output was still truncated after {max_continuations} continuation attempts."
+                    )
 
             if progress_label:
                 elapsed = format_timestamp(time.time() - request_start)
                 print(f"\r    {progress_label} ✓ 完成，耗時 {elapsed}{' ' * 20}")
 
-            return content
+            return content.strip()
 
         except Exception as e:
             if progress_label:
@@ -497,6 +743,79 @@ def _extract_duration_from_markdown(markdown_text: str, fallback: str = "00:00")
     return fallback
 
 
+def _split_english_markdown_sections(english_markdown: str) -> tuple[str, str]:
+    summary_text = ""
+    detailed_text = english_markdown.strip()
+    detailed_marker = "\n## Detailed Notes\n"
+
+    if detailed_marker not in english_markdown:
+        return summary_text, detailed_text
+
+    prefix, detailed = english_markdown.split(detailed_marker, 1)
+    detailed_text = detailed.strip()
+
+    sections = prefix.split("\n\n---\n\n", 1)
+    if len(sections) == 2:
+        summary_text = sections[1].strip()
+
+    return summary_text, detailed_text
+
+
+def _has_required_headings(markdown_text: str, headings: list[str]) -> bool:
+    stripped = markdown_text.strip()
+    if not stripped:
+        return False
+    return all(heading in stripped for heading in headings)
+
+
+def _generate_validated_english_summary(
+    client: OpenAI,
+    model: str,
+    system_prompt: str,
+    primary_prompt: str,
+    config: dict,
+    progress_label: str,
+    fallback_prompt: str | None = None,
+) -> str:
+    prompts = [
+        (primary_prompt, progress_label),
+        (
+            primary_prompt
+            + "\n\nReminder: output every required heading, and do not return an empty response.",
+            f"{progress_label} 重試",
+        ),
+    ]
+
+    for prompt, label in prompts:
+        summary = call_llm(
+            client,
+            model,
+            system_prompt,
+            prompt,
+            config,
+            progress_label=label,
+        )
+        summary = _unwrap_outer_markdown_fence(summary).strip()
+        if _has_required_headings(summary, EN_REQUIRED_SUMMARY_HEADINGS):
+            return summary
+
+    if fallback_prompt:
+        print("\n  ⚠ 摘要輸出不完整，改用英文筆記備援摘要...")
+        summary = call_llm(
+            client,
+            model,
+            system_prompt,
+            fallback_prompt,
+            config,
+            progress_label=f"{progress_label} 備援",
+        )
+        summary = _unwrap_outer_markdown_fence(summary).strip()
+        if _has_required_headings(summary, EN_REQUIRED_SUMMARY_HEADINGS):
+            return summary
+
+    raise RuntimeError("English summary generation returned empty or incomplete output.")
+
+
 def _group_note_batches(notes_text: str, max_chars: int) -> list[str]:
     parts = [part.strip() for part in notes_text.split("\n\n---\n\n") if part.strip()]
     if not parts:
@@ -590,6 +909,135 @@ def cleanup_english_detailed_notes(
     )
     normalized_notes = _unwrap_outer_markdown_fence(normalized_notes).strip()
     return normalized_notes or cleaned_notes
+
+
+def _get_oneshot_settings(config: dict, default_model: str) -> dict:
+    llm_cfg = config.get("llm", {})
+    oneshot_cfg = config.get("llm_oneshot", {})
+    return {
+        "model": oneshot_cfg.get("model", default_model),
+        "max_tokens": oneshot_cfg.get("max_tokens", max(llm_cfg.get("max_tokens", 4096), 12288)),
+        "temperature": oneshot_cfg.get("temperature", 0.2),
+        "max_retries": oneshot_cfg.get("max_retries", llm_cfg.get("max_retries", 3)),
+    }
+
+
+def build_english_notes_from_transcript_oneshot(
+    transcript_json_path: Path,
+    config: dict,
+    client: OpenAI,
+) -> tuple[str, str, str, str]:
+    """Process one transcript in a dedicated one-shot flow."""
+    llm_cfg = config.get("llm", {})
+    notes_cfg = config.get("notes", {})
+    default_model = llm_cfg.get("model", "qwen2.5:7b-instruct-q4_K_M")
+    settings = _get_oneshot_settings(config, default_model)
+    request_delay = llm_cfg.get("request_delay", 1.0)
+    include_timestamps = notes_cfg.get("include_timestamps", True)
+    generate_summary = notes_cfg.get("generate_summary", True)
+    generate_qa = notes_cfg.get("generate_qa", True)
+    use_slides_context = notes_cfg.get("use_slides_context", True)
+    detect_code = notes_cfg.get("detect_code", True)
+
+    video_title = transcript_json_path.stem
+
+    with open(transcript_json_path, "r", encoding="utf-8") as f:
+        segments = json.load(f)
+
+    slide_blocks = []
+    if use_slides_context:
+        slides_context = _load_slides_context(video_title, config)
+        if slides_context:
+            print(f"  ✓ 載入 slides 內容（{len(slides_context)} 字）")
+            slide_blocks = _build_slide_blocks(slides_context, config)
+            print(f"  ✓ slides 已建立檢索索引（{len(slide_blocks)} 段）")
+        else:
+            print("  ℹ 未找到可用 slides，改為僅使用逐字稿")
+    else:
+        print("  ⏭ 已關閉 slides 參考（notes.use_slides_context = false）")
+
+    if include_timestamps:
+        full_text = "\n".join(
+            f"[{format_timestamp(seg['start'])}] {seg['text']}"
+            for seg in segments
+        )
+    else:
+        full_text = "\n".join(seg["text"] for seg in segments)
+
+    print(f"  逐字稿共 {len(full_text)} 字，採 one-shot 單次生成")
+    code_policy = _build_code_policy(
+        _chunk_has_code_evidence(full_text),
+        allow_code_blocks=detect_code,
+        language="en",
+    )
+    slides_context_block = _build_slides_context_block_for_chunk(full_text, slide_blocks, config)
+    oneshot_prompt = ONE_SHOT_DETAILED_PROMPT_TEMPLATE.format(
+        video_title=video_title,
+        full_transcript=full_text,
+        code_policy=code_policy,
+    )
+    if slides_context_block:
+        oneshot_prompt = f"{oneshot_prompt.rstrip()}\n\n{slides_context_block}\n"
+
+    detailed_notes = call_llm(
+        client,
+        settings["model"],
+        SYSTEM_PROMPT_ONE_SHOT,
+        oneshot_prompt,
+        config,
+        progress_label="One-shot 詳細筆記",
+        max_tokens_override=settings["max_tokens"],
+        temperature_override=settings["temperature"],
+        max_retries_override=settings["max_retries"],
+    )
+    detailed_notes = _unwrap_outer_markdown_fence(detailed_notes).strip()
+    detailed_notes = cleanup_english_detailed_notes(
+        detailed_notes,
+        video_title,
+        config,
+        client,
+        settings["model"],
+    )
+
+    total_duration = format_timestamp(segments[-1]["end"]) if segments else "00:00"
+    summary_section = ""
+    if generate_summary:
+        print("\n  📋 生成課程摘要...")
+        qa_part = QA_SECTION if generate_qa else ""
+        summary_prompt = SUMMARY_PROMPT_TEMPLATE.format(
+            video_title=video_title,
+            full_notes=detailed_notes,
+            qa_section=qa_part,
+        )
+        summary_section = _generate_validated_english_summary(
+            client,
+            settings["model"],
+            SYSTEM_PROMPT_ONE_SHOT,
+            summary_prompt,
+            config,
+            progress_label="課程摘要",
+        )
+
+    if request_delay:
+        time.sleep(request_delay)
+
+    final_md = f"""# {video_title}
+
+> **Duration**: {total_duration}  
+> **Generated by**: {settings["model"]}  
+
+---
+
+{summary_section}
+
+---
+
+## Detailed Notes
+
+{detailed_notes}
+"""
+
+    return final_md, detailed_notes, total_duration, settings["model"]
 
 
 def _normalize_slide_text(text: str) -> str:
@@ -920,8 +1368,8 @@ def _load_slides_context(video_title: str, config: dict) -> str:
     return raw
 
 
-def generate_zh_notes_from_english_notes(
-    english_notes: str,
+def generate_zh_notes_from_english_markdown(
+    english_markdown: str,
     video_title: str,
     total_duration: str,
     config: dict,
@@ -930,7 +1378,12 @@ def generate_zh_notes_from_english_notes(
 ) -> str:
     settings = _get_zh_settings(config, default_model)
     zh_model = settings["model"]
-    zh_source_chunks = chunk_text(english_notes, settings["chunk_size"], settings["chunk_overlap"])
+    english_summary, english_notes = _split_english_markdown_sections(english_markdown)
+    zh_source_chunks = chunk_markdown_by_sections(
+        english_notes,
+        settings["chunk_size"],
+        settings["chunk_overlap"],
+    )
     total_zh_chunks = len(zh_source_chunks)
     zh_detail_chunks = []
     zh_start_time = time.time()
@@ -992,14 +1445,18 @@ def generate_zh_notes_from_english_notes(
     combined_notes_zh = "\n\n---\n\n".join(zh_detail_chunks)
 
     print("\n  🇹🇼 生成繁中課程摘要...")
-    zh_input = combined_notes_zh
-
-    zh_qa_part = ZH_QA_SECTION if settings["generate_qa"] else ""
-    zh_prompt = ZH_SUMMARY_PROMPT_TEMPLATE.format(
-        video_title=video_title,
-        full_notes=zh_input,
-        qa_section=zh_qa_part,
-    )
+    if english_summary:
+        zh_prompt = ZH_SUMMARY_FROM_ENGLISH_PROMPT_TEMPLATE.format(
+            video_title=video_title,
+            english_summary=english_summary,
+        )
+    else:
+        zh_qa_part = ZH_QA_SECTION if settings["generate_qa"] else ""
+        zh_prompt = ZH_SUMMARY_PROMPT_TEMPLATE.format(
+            video_title=video_title,
+            full_notes=combined_notes_zh,
+            qa_section=zh_qa_part,
+        )
     zh_content = call_llm(
         client,
         zh_model,
@@ -1132,24 +1589,29 @@ def build_english_notes_from_transcript(
     total_duration = format_timestamp(segments[-1]["end"]) if segments else "00:00"
 
     summary_section = ""
-    notes_for_summary = combined_notes
     if generate_summary:
         print("\n  📋 生成課程摘要...")
 
         qa_part = QA_SECTION if generate_qa else ""
-        summary_prompt = SUMMARY_PROMPT_TEMPLATE.format(
+        summary_prompt = TRANSCRIPT_SUMMARY_PROMPT_TEMPLATE.format(
             video_title=video_title,
-            full_notes=notes_for_summary,
+            full_transcript=full_text,
+            qa_section=qa_part,
+        )
+        fallback_summary_prompt = SUMMARY_PROMPT_TEMPLATE.format(
+            video_title=video_title,
+            full_notes=combined_notes,
             qa_section=qa_part,
         )
 
-        summary_section = call_llm(
+        summary_section = _generate_validated_english_summary(
             client,
             model,
-            system_prompt,
+            SYSTEM_PROMPT_ONE_SHOT,
             summary_prompt,
             config,
             progress_label="課程摘要",
+            fallback_prompt=fallback_summary_prompt,
         )
 
     final_md = f"""# {video_title}
@@ -1178,7 +1640,7 @@ def process_transcript(transcript_json_path: Path, config: dict,
     generate_zh_notes = notes_cfg.get("generate_zh_summary", True)
     video_title = transcript_json_path.stem
 
-    final_md, combined_notes, total_duration, model = build_english_notes_from_transcript(
+    final_md, _combined_notes, total_duration, model = build_english_notes_from_transcript(
         transcript_json_path,
         config,
         client,
@@ -1186,8 +1648,8 @@ def process_transcript(transcript_json_path: Path, config: dict,
 
     zh_summary_md = ""
     if generate_zh_notes:
-        zh_summary_md = generate_zh_notes_from_english_notes(
-            combined_notes,
+        zh_summary_md = generate_zh_notes_from_english_markdown(
+            final_md,
             video_title,
             total_duration,
             config,
@@ -1272,14 +1734,9 @@ def main():
             try:
                 english_markdown = output_path.read_text(encoding="utf-8")
                 duration = _extract_duration_from_markdown(english_markdown, fallback="00:00")
-                detailed_marker = "\n## Detailed Notes\n"
-                if detailed_marker in english_markdown:
-                    english_source = english_markdown.split(detailed_marker, 1)[1].strip()
-                else:
-                    english_source = english_markdown
 
-                markdown_zh = generate_zh_notes_from_english_notes(
-                    english_source,
+                markdown_zh = generate_zh_notes_from_english_markdown(
+                    english_markdown,
                     stem,
                     duration,
                     config,
@@ -1300,7 +1757,7 @@ def main():
         print(f"📓 處理：{stem}")
 
         try:
-            markdown_en, english_source, duration, model_name = build_english_notes_from_transcript(
+            markdown_en, _english_source, duration, model_name = build_english_notes_from_transcript(
                 transcript_path,
                 config,
                 client,
@@ -1317,8 +1774,8 @@ def main():
 
         if generate_zh_notes:
             try:
-                markdown_zh = generate_zh_notes_from_english_notes(
-                    english_source,
+                markdown_zh = generate_zh_notes_from_english_markdown(
+                    markdown_en,
                     stem,
                     duration,
                     config,
